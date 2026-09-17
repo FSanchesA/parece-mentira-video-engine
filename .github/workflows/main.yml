@@ -1,4 +1,4 @@
-name: Parece Mentira - Video Engine V15.1 Gemini AI Director
+name: Parece Mentira - Video Engine V15.2 Gemini Resilient Director
 on:
   workflow_dispatch:
     inputs:
@@ -1006,13 +1006,92 @@ jobs:
                   )
               )
 
-          response = client.models.generate_content(
-              model="gemini-3.8-flash",
-              contents=contents,
-              config=types.GenerateContentConfig(
-                  response_mime_type="application/json",
-                  temperature=0.35
+          import time
+          from google.genai import errors
+
+          # -------------------------------------------------
+          # RESILIENCIA DE MODELO
+          #
+          # 503 = modelo temporariamente sobrecarregado.
+          # Tenta novamente e, se necessario, troca para
+          # outro Flash multimodal do Free Tier.
+          # -------------------------------------------------
+
+          models_to_try = [
+              "gemini-3.8-flash",
+              "gemini-3.7-flash",
+              "gemini-3.6-flash",
+              "gemini-3.5-flash",
+          ]
+
+          response = None
+          selected_model = None
+          last_error = None
+
+          for model_name in models_to_try:
+              for attempt in range(1, 4):
+                  try:
+                      print(
+                          f"Tentando {model_name} "
+                          f"(tentativa {attempt}/3)..."
+                      )
+
+                      response = client.models.generate_content(
+                          model=model_name,
+                          contents=contents,
+                          config=types.GenerateContentConfig(
+                              response_mime_type="application/json",
+                              temperature=0.35
+                          )
+                      )
+
+                      if response and (response.text or "").strip():
+                          selected_model = model_name
+                          break
+
+                  except Exception as exc:
+                      last_error = exc
+                      msg = str(exc)
+
+                      retryable = (
+                          "503" in msg
+                          or "UNAVAILABLE" in msg
+                          or "429" in msg
+                          or "RESOURCE_EXHAUSTED" in msg
+                          or "high demand" in msg.lower()
+                      )
+
+                      print(
+                          f"Falha em {model_name}: {exc}"
+                      )
+
+                      if not retryable:
+                          raise
+
+                      if attempt < 3:
+                          wait_seconds = 8 * attempt
+                          print(
+                              f"Aguardando {wait_seconds}s "
+                              f"antes de tentar novamente..."
+                          )
+                          time.sleep(wait_seconds)
+
+              if selected_model:
+                  break
+
+              print(
+                  f"{model_name} indisponivel. "
+                  "Tentando modelo fallback..."
               )
+
+          if response is None or selected_model is None:
+              raise RuntimeError(
+                  "Nenhum modelo Gemini respondeu. "
+                  f"Ultimo erro: {last_error}"
+              )
+
+          print(
+              f"AI Director executado com: {selected_model}"
           )
 
           raw = (response.text or "").strip()
@@ -1142,7 +1221,7 @@ jobs:
           Path(
               "output/stage06_ai/provider.txt"
           ).write_text(
-              "Gemini 3.8 Flash\n",
+              selected_model + "\n",
               encoding="utf-8"
           )
 
@@ -1836,7 +1915,7 @@ jobs:
           fi
 
           echo "========================================"
-          echo "V15.1 GEMINI AI DIRECTOR VALIDADO"
+          echo "V15.2 GEMINI RESILIENT DIRECTOR VALIDADO"
           echo "Vision: OK"
           echo "Prompt opcional: OK"
           echo "Video sem narracao: suportado"
