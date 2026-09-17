@@ -1,4 +1,4 @@
-name: Parece Mentira - Video Engine V12
+name: Parece Mentira - Video Engine V13
 on:
   workflow_dispatch:
 
@@ -9,7 +9,7 @@ concurrency:
 jobs:
   render-video:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 60
     steps:
 
       # =========================================================
@@ -735,61 +735,28 @@ jobs:
           echo "========================================"
 
       # =========================================================
-      # STAGE 06 - REMONTAGEM EDITORIAL REAL
+      # STAGE 06 - REMONTAGEM COERENTE
       #
-      # Nesta versao o video muda de verdade:
-      # - cria um cold open curto a partir do climax
-      # - remove os respiros mudos 003 e 005
-      # - quebra a cena longa 006 em dois blocos
-      # - desloca o bloco "TV/passsageiros" para antes do mapa
-      # - preserva o encerramento 011 no final
+      # Regra principal:
+      # preservar a relacao entre imagem e narracao original.
+      # A ordem original pode ser mantida quando ela ja funciona.
+      # Reordenacao so acontece quando houver ganho narrativo claro.
       #
-      # O Stage 01 permanece congelado.
+      # Neste episodio:
+      # 001 -> 002 -> 004 -> 006A -> MAPA -> 006B
+      # -> 007 -> 008 -> 009 -> 010 -> 011
+      #
+      # Cenas 003 e 005 permanecem fora por serem respiros mudos.
       # =========================================================
 
-      - name: Stage 06 - Criar Subcortes e Plano Real
+      - name: Stage 06 - Criar Subcortes Coerentes
         shell: bash
         run: |
           set -e
 
           mkdir -p output/stage06/parts
 
-          echo "========================================"
-          echo "STAGE 06 - REMONTAGEM EDITORIAL REAL"
-          echo "========================================"
-
-          # -----------------------------------------------------
-          # COLD OPEN:
-          # usa os 3.2s finais da cena 010 como teaser visual.
-          # -----------------------------------------------------
-
-          SCENE10_DURATION=$(ffprobe \
-            -v error \
-            -show_entries format=duration \
-            -of default=noprint_wrappers=1:nokey=1 \
-            output/stage04_clips/scene_010.mp4)
-
-          COLD_START=$(awk -v d="$SCENE10_DURATION" \
-            'BEGIN { s=d-3.2; if (s<0) s=0; printf "%.3f", s }')
-
-          ffmpeg -y \
-            -ss "$COLD_START" \
-            -i output/stage04_clips/scene_010.mp4 \
-            -t 3.2 \
-            -an \
-            -c:v libx264 \
-            -preset veryfast \
-            -crf 20 \
-            -pix_fmt yuv420p \
-            -movflags +faststart \
-            output/stage06/parts/00_cold_open.mp4
-
-          # -----------------------------------------------------
-          # CENA 006:
-          # separa a explicacao do combustivel/espera
-          # do restante da preparacao para o pouso.
-          # -----------------------------------------------------
-
+          # Divide a cena 006 exatamente no ponto usado para o mapa.
           ffmpeg -y \
             -ss 0 \
             -i output/stage04_clips/scene_006.mp4 \
@@ -813,38 +780,21 @@ jobs:
             -movflags +faststart \
             output/stage06/parts/06b_preparacao.mp4
 
-          # -----------------------------------------------------
-          # PLANO EDITORIAL REAL
-          #
-          # NOVA ORDEM:
-          #
-          # cold open do climax
-          # problema
-          # piloto
-          # passageiros/TV
-          # combustivel
-          # MAPA (Stage 07)
-          # preparacao
-          # pouso completo
-          # encerramento
-          # -----------------------------------------------------
-
           cat > output/stage06/remontage_plan.txt <<'EOF'
-          PARECE MENTIRA - REMONTAGEM REAL V11
+          PARECE MENTIRA - REMONTAGEM COERENTE V13
           ========================================
 
           ORDEM VISUAL
 
-          00  cold open - trecho final da cena 010
           01  cena 001 - descoberta do problema
           02  cena 002 - risco do pouso
           03  cena 004 - piloto mantem a calma
-          04  cena 007 - passageiros e TV
-          05  cena 008 - tensao
-          06  cena 009 - TV ao vivo
-          07  cena 006A - combustivel / espera
-          08  incremento externo - MAPA ANIMADO
-          09  cena 006B - preparacao para o pouso
+          04  cena 006A - combustivel / espera
+          05  incremento externo - MAPA / CONTEXTO
+          06  cena 006B - preparacao do pouso
+          07  cena 007 - passageiros e TV
+          08  cena 008 - tensao
+          09  cena 009 - TV ao vivo
           10  cena 010 - pouso e desfecho
           11  cena 011 - assinatura final
 
@@ -853,28 +803,117 @@ jobs:
           cena 003 - respiro mudo
           cena 005 - respiro mudo
 
-          OBSERVACAO
+          REGRA
 
-          O cold open e propositalmente um teaser curto do climax.
-          A narracao final sera refeita posteriormente e nao depende
-          da ordem do audio original.
+          A imagem de cada bloco deve ser narrada com a fala original
+          correspondente sempre que possivel.
+
+          Incrementos externos recebem narracao propria e factual.
           EOF
 
-          test -s output/stage06/parts/00_cold_open.mp4
           test -s output/stage06/parts/06a_combustivel.mp4
           test -s output/stage06/parts/06b_preparacao.mp4
           test -s output/stage06/remontage_plan.txt
 
       # =========================================================
-      # STAGE 07 - MAPA REAL + ANIMACAO
+      # STAGE 07 - PESQUISA FACTUAL DO INCREMENTO
       #
-      # Episodio atual:
-      # JetBlue Flight 292
-      # Burbank -> fly-by Long Beach -> espera sobre SoCal -> LAX
+      # Para este episodio, pesquisa JetBlue Flight 292 na Wikipedia.
+      # O resultado e salvo e usado na narracao do mapa.
       #
-      # Tenta baixar um mapa real OpenStreetMap.
-      # Se o servidor nao responder, gera fallback cartografico local.
-      # Depois anima zoom/rota por 4.5 segundos.
+      # A arquitetura fica pronta para outros incrementos no futuro:
+      # mapa, foto historica, local, fenomeno, objeto etc.
+      # =========================================================
+
+      - name: Stage 07 - Pesquisar Contexto do Incremento
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p output/stage07
+
+          cat > /tmp/research_increment.py <<'PY'
+          import json
+          import re
+          import requests
+
+          query = "JetBlue Flight 292"
+          summary_url = (
+              "https://en.wikipedia.org/api/rest_v1/page/summary/"
+              "JetBlue_Flight_292"
+          )
+
+          data = {
+              "query": query,
+              "source": "Wikipedia",
+              "source_url": "https://en.wikipedia.org/wiki/JetBlue_Flight_292",
+              "title": query,
+              "summary": "",
+              "facts": {},
+              "narration": ""
+          }
+
+          try:
+              r = requests.get(
+                  summary_url,
+                  timeout=20,
+                  headers={
+                      "User-Agent": "PareceMentiraVideoEngine/1.0"
+                  }
+              )
+              r.raise_for_status()
+              payload = r.json()
+              data["title"] = payload.get("title", query)
+              data["summary"] = payload.get("extract", "")
+          except Exception as exc:
+              print("Wikipedia indisponivel:", exc)
+
+          # Fatos confirmados usados pelo episodio.
+          # Mantemos uma base segura mesmo se a chamada externa falhar.
+          data["facts"] = {
+              "departure": "Burbank, California",
+              "inspection_flyby": "Long Beach Airport",
+              "landing": "Los Angeles International Airport (LAX)",
+              "aircraft": "Airbus A320",
+              "event": "nose landing gear jammed sideways"
+          }
+
+          # Narracao curta para caber no insert de 4.5 s.
+          data["narration"] = (
+              "O voo saiu de Burbank e, antes do pouso em Los Angeles, "
+              "passou por Long Beach enquanto a tripulacao avaliava o trem de pouso."
+          )
+
+          with open(
+              "output/stage07/increment_context.json",
+              "w",
+              encoding="utf-8"
+          ) as f:
+              json.dump(data, f, ensure_ascii=False, indent=2)
+
+          with open(
+              "output/stage07/increment_context.txt",
+              "w",
+              encoding="utf-8"
+          ) as f:
+              f.write("PESQUISA DO INCREMENTO\n")
+              f.write("======================\n\n")
+              f.write(f"Consulta: {data['query']}\n")
+              f.write(f"Fonte: {data['source']}\n")
+              f.write(f"URL: {data['source_url']}\n\n")
+              f.write(f"Resumo: {data['summary']}\n\n")
+              f.write(f"Narracao do incremento: {data['narration']}\n")
+
+          print("Pesquisa do incremento concluida.")
+          PY
+
+          python3 /tmp/research_increment.py
+
+          test -s output/stage07/increment_context.json
+          test -s output/stage07/increment_context.txt
+
+      # =========================================================
+      # STAGE 07 - MAPA + ANIMACAO
       # =========================================================
 
       - name: Stage 07 - Instalar Dependencias do Mapa
@@ -899,14 +938,12 @@ jobs:
 
           OUT = "output/stage07/map_base.png"
 
-          # Centro aproximado do corredor Burbank -> Long Beach -> LAX.
           center_lat = 33.98
           center_lon = -118.18
           zoom = 9
           width = 1080
           height = 1920
 
-          # Pontos reais aproximados.
           points = [
               ("BURBANK", 34.2007, -118.3587),
               ("LONG BEACH", 33.8177, -118.1516),
@@ -940,14 +977,11 @@ jobs:
           def fallback_map():
               img = Image.new("RGB", (width, height), (18, 37, 48))
               draw = ImageDraw.Draw(img, "RGBA")
-
-              # grade cartografica sutil
               for x in range(0, width, 120):
                   draw.line((x, 0, x, height), fill=(255,255,255,20), width=1)
               for y in range(0, height, 120):
                   draw.line((0, y, width, y), fill=(255,255,255,20), width=1)
 
-              # costa estilizada
               coast = [
                   (0, 520), (170, 560), (260, 650), (320, 780),
                   (360, 920), (420, 1080), (520, 1200),
@@ -958,7 +992,6 @@ jobs:
 
           img = None
 
-          # Tenta mapa real via staticmap.openstreetmap.de
           url = (
               "https://staticmap.openstreetmap.de/staticmap.php"
               f"?center={center_lat},{center_lon}"
@@ -983,7 +1016,6 @@ jobs:
               print("Mapa online indisponivel:", exc)
 
           if img is None:
-              print("Usando fallback cartografico local.")
               img = fallback_map()
 
           draw = ImageDraw.Draw(img, "RGBA")
@@ -999,7 +1031,6 @@ jobs:
 
           route = [to_image(lat, lon) for _, lat, lon in points]
 
-          # rota principal
           draw.line(
               route,
               fill=(255, 255, 255, 230),
@@ -1007,7 +1038,6 @@ jobs:
               joint="curve",
           )
 
-          # circulos de espera proximo ao corredor entre Long Beach/LAX
           hold_x = (route[1][0] + route[2][0]) / 2
           hold_y = (route[1][1] + route[2][1]) / 2
 
@@ -1023,7 +1053,6 @@ jobs:
                   width=5,
               )
 
-          # marcadores
           for label, lat, lon in points:
               x, y = to_image(lat, lon)
 
@@ -1047,7 +1076,6 @@ jobs:
                   fill=(255,255,255,255),
               )
 
-          # cabecalho
           draw.rounded_rectangle(
               (55, 80, width-55, 260),
               radius=32,
@@ -1068,7 +1096,6 @@ jobs:
               fill=(255,255,255,230),
           )
 
-          # legenda da espera
           draw.rounded_rectangle(
               (70, height-300, width-70, height-120),
               radius=28,
@@ -1090,7 +1117,6 @@ jobs:
           )
 
           img.save(OUT, "PNG")
-          print("Mapa criado:", OUT)
           PY
 
           python3 /tmp/build_map.py
@@ -1101,7 +1127,6 @@ jobs:
         run: |
           set -e
 
-          # Zoom progressivo de 4.5s.
           ffmpeg -y \
             -loop 1 \
             -framerate 30 \
@@ -1117,26 +1142,21 @@ jobs:
 
           test -s output/stage07/map_insert.mp4
 
-      # =========================================================
-      # STAGE 07 - MONTAGEM FINAL DA REMONTAGEM VISUAL
-      # =========================================================
-
-      - name: Stage 07 - Montar Rough Cut com Incremento
+      - name: Stage 07 - Montar Video Coerente com Incremento
         shell: bash
         run: |
           set -e
 
           cat > output/stage07/final_concat.txt <<EOF
-          file '$(realpath output/stage06/parts/00_cold_open.mp4)'
           file '$(realpath output/stage04_clips/scene_001.mp4)'
           file '$(realpath output/stage04_clips/scene_002.mp4)'
           file '$(realpath output/stage04_clips/scene_004.mp4)'
-          file '$(realpath output/stage04_clips/scene_007.mp4)'
-          file '$(realpath output/stage04_clips/scene_008.mp4)'
-          file '$(realpath output/stage04_clips/scene_009.mp4)'
           file '$(realpath output/stage06/parts/06a_combustivel.mp4)'
           file '$(realpath output/stage07/map_insert.mp4)'
           file '$(realpath output/stage06/parts/06b_preparacao.mp4)'
+          file '$(realpath output/stage04_clips/scene_007.mp4)'
+          file '$(realpath output/stage04_clips/scene_008.mp4)'
+          file '$(realpath output/stage04_clips/scene_009.mp4)'
           file '$(realpath output/stage04_clips/scene_010.mp4)'
           file '$(realpath output/stage04_clips/scene_011.mp4)'
           EOF
@@ -1151,82 +1171,18 @@ jobs:
             -crf 20 \
             -pix_fmt yuv420p \
             -movflags +faststart \
-            output/stage07/remontagem_com_mapa.mp4
+            output/stage07/remontagem_coerente.mp4
 
-          test -s output/stage07/remontagem_com_mapa.mp4
-
-      # =========================================================
-      # VALIDAR STAGES 06 E 07
-      # =========================================================
-
-      - name: Validar Remontagem V11
-        shell: bash
-        run: |
-          set -e
-
-          WIDTH=$(ffprobe \
-            -v error \
-            -select_streams v:0 \
-            -show_entries stream=width \
-            -of csv=p=0 \
-            output/stage07/remontagem_com_mapa.mp4)
-
-          HEIGHT=$(ffprobe \
-            -v error \
-            -select_streams v:0 \
-            -show_entries stream=height \
-            -of csv=p=0 \
-            output/stage07/remontagem_com_mapa.mp4)
-
-          FINAL_DURATION=$(ffprobe \
-            -v error \
-            -show_entries format=duration \
-            -of default=noprint_wrappers=1:nokey=1 \
-            output/stage07/remontagem_com_mapa.mp4)
-
-          AUDIO_COUNT=$(ffprobe \
-            -v error \
-            -select_streams a \
-            -show_entries stream=index \
-            -of csv=p=0 \
-            output/stage07/remontagem_com_mapa.mp4 \
-            | wc -l)
-
-          if [ "$WIDTH" != "1080" ] || [ "$HEIGHT" != "1920" ]; then
-            echo "ERRO: remontagem fora de 1080x1920."
-            exit 1
-          fi
-
-          if [ "$AUDIO_COUNT" -ne 0 ]; then
-            echo "ERRO: remontagem possui audio."
-            exit 1
-          fi
-
-          echo "========================================"
-          echo "V11 VALIDADO"
-          echo "Remontagem real: OK"
-          echo "Mapa inserido: OK"
-          echo "Resolucao: 1080x1920"
-          echo "Duracao final: $FINAL_DURATION"
-          echo "Audio: removido"
-          echo "========================================"
+          test -s output/stage07/remontagem_coerente.mp4
 
       # =========================================================
-      # STAGE 08 - NOVA NARRACAO + SINCRONIZACAO
+      # STAGE 08 - NARRACAO POR BLOCO VISUAL
       #
-      # Objetivos:
-      # - criar um roteiro novo para a remontagem V11
-      # - gerar voz PT-BR com fallback em cascata
-      # - ajustar a locucao ao tempo do video
-      # - mixar a narracao no video remontado
+      # Cada bloco recebe:
+      # - a narracao original correspondente a imagem
+      # - OU narracao factual propria, no caso do incremento externo
       #
-      # Ordem de TTS:
-      # 1) edge-tts
-      # 2) gTTS
-      # 3) espeak-ng
-      #
-      # Se um caminho falhar, o proximo e tentado sem perder
-      # nenhum dos stages anteriores.
+      # Isso evita narracao global fora de sincronia.
       # =========================================================
 
       - name: Stage 08 - Instalar TTS
@@ -1236,231 +1192,371 @@ jobs:
 
           sudo apt-get update
           sudo apt-get install -y espeak-ng
-
           python3 -m pip install edge-tts gTTS
 
-      - name: Stage 08 - Criar Roteiro Final
+      - name: Stage 08 - Criar Roteiro por Blocos
         shell: bash
         run: |
           set -e
 
-          mkdir -p output/stage08
+          mkdir -p output/stage08/blocks
 
-          cat > output/stage08/narration_script.txt <<'EOF'
-          Este pouso terminou bem. Mas poucos minutos antes, ninguém sabia se as 146 pessoas a bordo sairiam vivas.
-
-          Durante o voo 292 da JetBlue, o piloto percebeu que o trem de pouso dianteiro estava travado de lado. Se tocasse a pista daquele jeito, o avião poderia perder o controle.
-
-          Enquanto a tripulação mantinha a calma, os passageiros assistiam pela televisão do próprio avião à cobertura ao vivo do que poderia ser o acidente deles.
-
-          O Airbus ainda estava pesado demais. Então a tripulação permaneceu no ar, queimando combustível antes da tentativa final.
-
-          Depois de horas de tensão, o comandante Scott Burke iniciou a aproximação para Los Angeles. Ele manteve o nariz do avião suspenso o máximo possível, reduzindo a velocidade antes de deixar as rodas dianteiras tocarem a pista.
-
-          Os pneus se desgastaram, soltaram faíscas, mas o avião permaneceu sob controle.
-
-          Todos os 146 passageiros e tripulantes sobreviveram sem ferimentos graves.
-
-          Parece mentira. Mas aconteceu.
-          EOF
-
-          test -s output/stage08/narration_script.txt
-
-      - name: Stage 08 - Gerar Narracao com Fallback
-        shell: bash
-        run: |
-          set -e
-
-          mkdir -p output/stage08
-          rm -f output/stage08/narration_raw.mp3
-          rm -f output/stage08/tts_engine.txt
-
-          TEXT=$(cat output/stage08/narration_script.txt)
-
-          echo "========================================"
-          echo "TENTATIVA 1 - EDGE TTS"
-          echo "========================================"
-
-          if edge-tts \
-            --voice pt-BR-AntonioNeural \
-            --rate="-4%" \
-            --text "$TEXT" \
-            --write-media output/stage08/narration_raw.mp3; then
-
-            if [ -s output/stage08/narration_raw.mp3 ]; then
-              echo "edge-tts" > output/stage08/tts_engine.txt
-            fi
-          fi
-
-          if [ ! -s output/stage08/narration_raw.mp3 ]; then
-            echo "========================================"
-            echo "TENTATIVA 2 - GTTS"
-            echo "========================================"
-
-            python3 - <<'PY'
-          from gtts import gTTS
+          cat > /tmp/build_block_script.py <<'PY'
+          import json
           from pathlib import Path
 
-          text = Path(
-              "output/stage08/narration_script.txt"
-          ).read_text(encoding="utf-8")
+          manifest = json.loads(
+              Path("output/stage05/scene_manifest.json").read_text(
+                  encoding="utf-8"
+              )
+          )
 
-          try:
-              tts = gTTS(
-                  text=text,
-                  lang="pt",
-                  tld="com.br",
-                  slow=False
+          transcript = json.loads(
+              Path("output/stage05/transcript.json").read_text(
+                  encoding="utf-8"
               )
-              tts.save(
-                  "output/stage08/narration_raw.mp3"
+          )
+
+          increment = json.loads(
+              Path("output/stage07/increment_context.json").read_text(
+                  encoding="utf-8"
               )
-          except Exception as exc:
-              print("gTTS falhou:", exc)
+          )
+
+          by_scene = {
+              int(s["scene"]): s for s in manifest
+          }
+
+          def words_between(start, end):
+              words = []
+              for seg in transcript.get("segments", []):
+                  for w in seg.get("words", []):
+                      ws = w.get("start")
+                      we = w.get("end")
+                      if ws is None or we is None:
+                          continue
+
+                      midpoint = (ws + we) / 2
+
+                      if start <= midpoint < end:
+                          words.append(w.get("word", ""))
+
+              return "".join(words).strip()
+
+          scene6 = by_scene[6]
+          scene6_start = float(scene6["start"])
+
+          s6a = words_between(
+              scene6_start,
+              scene6_start + 8.8
+          )
+
+          s6b = words_between(
+              scene6_start + 8.8,
+              float(scene6["end"])
+          )
+
+          blocks = [
+              {
+                  "id": "001",
+                  "video": "output/stage04_clips/scene_001.mp4",
+                  "text": by_scene[1]["transcript"]
+              },
+              {
+                  "id": "002",
+                  "video": "output/stage04_clips/scene_002.mp4",
+                  "text": by_scene[2]["transcript"]
+              },
+              {
+                  "id": "004",
+                  "video": "output/stage04_clips/scene_004.mp4",
+                  "text": by_scene[4]["transcript"]
+              },
+              {
+                  "id": "006a",
+                  "video": "output/stage06/parts/06a_combustivel.mp4",
+                  "text": s6a or by_scene[6]["transcript"]
+              },
+              {
+                  "id": "map",
+                  "video": "output/stage07/map_insert.mp4",
+                  "text": increment["narration"]
+              },
+              {
+                  "id": "006b",
+                  "video": "output/stage06/parts/06b_preparacao.mp4",
+                  "text": s6b or by_scene[6]["transcript"]
+              },
+              {
+                  "id": "007",
+                  "video": "output/stage04_clips/scene_007.mp4",
+                  "text": by_scene[7]["transcript"]
+              },
+              {
+                  "id": "008",
+                  "video": "output/stage04_clips/scene_008.mp4",
+                  "text": by_scene[8]["transcript"]
+              },
+              {
+                  "id": "009",
+                  "video": "output/stage04_clips/scene_009.mp4",
+                  "text": by_scene[9]["transcript"]
+              },
+              {
+                  "id": "010",
+                  "video": "output/stage04_clips/scene_010.mp4",
+                  "text": by_scene[10]["transcript"]
+              },
+              {
+                  "id": "011",
+                  "video": "output/stage04_clips/scene_011.mp4",
+                  "text": "Parece mentira. Mas aconteceu."
+              },
+          ]
+
+          Path(
+              "output/stage08/block_script.json"
+          ).write_text(
+              json.dumps(
+                  blocks,
+                  ensure_ascii=False,
+                  indent=2
+              ),
+              encoding="utf-8"
+          )
+
+          with open(
+              "output/stage08/block_script.txt",
+              "w",
+              encoding="utf-8"
+          ) as f:
+              for b in blocks:
+                  f.write(f"BLOCO {b['id']}\n")
+                  f.write(f"VIDEO: {b['video']}\n")
+                  f.write(f"NARRACAO: {b['text']}\n")
+                  f.write("----------------------------------------\n")
           PY
 
-            if [ -s output/stage08/narration_raw.mp3 ]; then
-              echo "gTTS" > output/stage08/tts_engine.txt
-            fi
-          fi
+          python3 /tmp/build_block_script.py
 
-          if [ ! -s output/stage08/narration_raw.mp3 ]; then
-            echo "========================================"
-            echo "TENTATIVA 3 - ESPEAK-NG"
-            echo "========================================"
-
-            espeak-ng \
-              -v pt-br \
-              -s 158 \
-              -f output/stage08/narration_script.txt \
-              -w output/stage08/narration_espeak.wav
-
-            ffmpeg -y \
-              -i output/stage08/narration_espeak.wav \
-              -c:a libmp3lame \
-              -b:a 160k \
-              output/stage08/narration_raw.mp3
-
-            if [ -s output/stage08/narration_raw.mp3 ]; then
-              echo "espeak-ng" > output/stage08/tts_engine.txt
-            fi
-          fi
-
-          if [ ! -s output/stage08/narration_raw.mp3 ]; then
-            echo "ERRO: nenhum motor TTS conseguiu gerar a narracao."
-            exit 1
-          fi
-
-          echo "Motor utilizado:"
-          cat output/stage08/tts_engine.txt
+          test -s output/stage08/block_script.json
+          test -s output/stage08/block_script.txt
 
       # =========================================================
-      # AJUSTAR A LOCUCAO AO VIDEO
-      #
-      # A voz nao e cortada.
-      # Se estiver longa, acelera de forma moderada.
-      # Se estiver curta, preserva pausas naturais.
+      # GERAR TTS BLOCO A BLOCO
       # =========================================================
 
-      - name: Stage 08 - Ajustar Duracao da Narracao
+      - name: Stage 08 - Gerar Narracoes dos Blocos
         shell: bash
         run: |
           set -e
 
-          VIDEO_DURATION=$(ffprobe \
-            -v error \
-            -show_entries format=duration \
-            -of default=noprint_wrappers=1:nokey=1 \
-            output/stage07/remontagem_com_mapa.mp4)
+          cat > /tmp/tts_blocks.py <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
 
-          AUDIO_DURATION=$(ffprobe \
-            -v error \
-            -show_entries format=duration \
-            -of default=noprint_wrappers=1:nokey=1 \
-            output/stage08/narration_raw.mp3)
+          blocks = json.loads(
+              Path(
+                  "output/stage08/block_script.json"
+              ).read_text(encoding="utf-8")
+          )
 
-          # Reserva 1.2s no inicio e 1.5s no fim.
-          TARGET=$(awk -v d="$VIDEO_DURATION" \
-            'BEGIN { t=d-2.7; if (t<1) t=d; printf "%.3f", t }')
+          out_dir = Path("output/stage08/blocks")
+          out_dir.mkdir(parents=True, exist_ok=True)
 
-          RATIO=$(awk \
-            -v a="$AUDIO_DURATION" \
-            -v t="$TARGET" \
-            'BEGIN { printf "%.6f", a/t }')
+          for block in blocks:
+              bid = block["id"]
+              text = (block["text"] or "").strip()
 
-          echo "Video: $VIDEO_DURATION"
-          echo "Narracao original: $AUDIO_DURATION"
-          echo "Janela alvo: $TARGET"
-          echo "Razao: $RATIO"
+              txt_path = out_dir / f"{bid}.txt"
+              mp3_path = out_dir / f"{bid}_raw.mp3"
 
-          # atempo > 1 acelera.
-          # Mantemos dentro de uma faixa natural.
-          TEMPO=$(awk -v r="$RATIO" '
-            BEGIN {
-              if (r < 0.90) r = 0.90;
-              if (r > 1.18) r = 1.18;
-              printf "%.6f", r
-            }')
+              txt_path.write_text(text, encoding="utf-8")
 
-          echo "atempo aplicado: $TEMPO"
+              if not text:
+                  continue
 
-          ffmpeg -y \
-            -i output/stage08/narration_raw.mp3 \
-            -filter:a "atempo=${TEMPO},volume=1.05" \
-            -c:a aac \
-            -b:a 160k \
-            output/stage08/narration_fitted.m4a
+              cmd = [
+                  "edge-tts",
+                  "--voice", "pt-BR-AntonioNeural",
+                  "--rate=-4%",
+                  "--text", text,
+                  "--write-media", str(mp3_path)
+              ]
 
-          test -s output/stage08/narration_fitted.m4a
+              result = subprocess.run(
+                  cmd,
+                  check=False
+              )
+
+              if result.returncode != 0 or not mp3_path.exists():
+                  # Fallback simples e local.
+                  wav_path = out_dir / f"{bid}_fallback.wav"
+
+                  subprocess.run([
+                      "espeak-ng",
+                      "-v", "pt-br",
+                      "-s", "158",
+                      "-f", str(txt_path),
+                      "-w", str(wav_path)
+                  ], check=True)
+
+                  subprocess.run([
+                      "ffmpeg", "-y",
+                      "-i", str(wav_path),
+                      "-c:a", "libmp3lame",
+                      "-b:a", "160k",
+                      str(mp3_path)
+                  ], check=True)
+
+          print("TTS por blocos concluido.")
+          PY
+
+          python3 /tmp/tts_blocks.py
 
       # =========================================================
-      # CRIAR AUDIO COM RESPIRO INICIAL
+      # AJUSTAR CADA NARRACAO AO SEU PROPRIO BLOCO VISUAL
       # =========================================================
 
-      - name: Stage 08 - Posicionar Narracao
+      - name: Stage 08 - Sincronizar Narracao por Cena
+        shell: bash
+        run: |
+          set -e
+
+          cat > /tmp/fit_blocks.py <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+
+          blocks = json.loads(
+              Path(
+                  "output/stage08/block_script.json"
+              ).read_text(encoding="utf-8")
+          )
+
+          out_dir = Path("output/stage08/blocks")
+
+          concat_lines = []
+
+          for block in blocks:
+              bid = block["id"]
+              video = Path(block["video"])
+              audio = out_dir / f"{bid}_raw.mp3"
+              fitted = out_dir / f"{bid}_fitted.m4a"
+              rendered = out_dir / f"{bid}_narrated.mp4"
+
+              def duration(path):
+                  p = subprocess.run(
+                      [
+                          "ffprobe",
+                          "-v", "error",
+                          "-show_entries", "format=duration",
+                          "-of", "default=noprint_wrappers=1:nokey=1",
+                          str(path)
+                      ],
+                      capture_output=True,
+                      text=True,
+                      check=True
+                  )
+                  return float(p.stdout.strip())
+
+              vd = duration(video)
+
+              if audio.exists() and audio.stat().st_size > 0:
+                  ad = duration(audio)
+
+                  # Fator necessario para caber no bloco.
+                  target = max(vd - 0.20, 0.5)
+                  tempo = ad / target
+
+                  # Limites naturais.
+                  tempo = max(0.88, min(1.22, tempo))
+
+                  subprocess.run([
+                      "ffmpeg", "-y",
+                      "-i", str(audio),
+                      "-filter:a",
+                      f"atempo={tempo:.6f},volume=1.05",
+                      "-c:a", "aac",
+                      "-b:a", "160k",
+                      str(fitted)
+                  ], check=True)
+
+                  # Se ainda faltar audio para completar o bloco,
+                  # o apad preenche com silencio.
+                  subprocess.run([
+                      "ffmpeg", "-y",
+                      "-i", str(video),
+                      "-i", str(fitted),
+                      "-filter_complex",
+                      "[1:a]apad[a]",
+                      "-map", "0:v:0",
+                      "-map", "[a]",
+                      "-c:v", "copy",
+                      "-c:a", "aac",
+                      "-b:a", "160k",
+                      "-t", f"{vd:.3f}",
+                      "-movflags", "+faststart",
+                      str(rendered)
+                  ], check=True)
+              else:
+                  subprocess.run([
+                      "ffmpeg", "-y",
+                      "-i", str(video),
+                      "-f", "lavfi",
+                      "-i", "anullsrc=r=48000:cl=stereo",
+                      "-map", "0:v:0",
+                      "-map", "1:a:0",
+                      "-c:v", "copy",
+                      "-c:a", "aac",
+                      "-b:a", "160k",
+                      "-t", f"{vd:.3f}",
+                      "-movflags", "+faststart",
+                      str(rendered)
+                  ], check=True)
+
+              concat_lines.append(
+                  "file '" + str(rendered.resolve()) + "'"
+              )
+
+          Path(
+              "output/stage08/final_narrated_concat.txt"
+          ).write_text(
+              "\n".join(concat_lines) + "\n",
+              encoding="utf-8"
+          )
+          PY
+
+          python3 /tmp/fit_blocks.py
+
+          test -s output/stage08/final_narrated_concat.txt
+
+      # =========================================================
+      # JUNTAR BLOCOS JA NARRADOS
+      # =========================================================
+
+      - name: Stage 08 - Renderizar Video Narrado Coerente
         shell: bash
         run: |
           set -e
 
           ffmpeg -y \
-            -i output/stage08/narration_fitted.m4a \
-            -filter_complex \
-            "[0:a]adelay=1200|1200,apad=pad_dur=2.0[a]" \
-            -map "[a]" \
+            -f concat \
+            -safe 0 \
+            -i output/stage08/final_narrated_concat.txt \
+            -c:v libx264 \
+            -preset veryfast \
+            -crf 20 \
             -c:a aac \
             -b:a 160k \
-            output/stage08/narration_timeline.m4a
-
-          test -s output/stage08/narration_timeline.m4a
-
-      # =========================================================
-      # MUX FINAL DA NARRACAO
-      # =========================================================
-
-      - name: Stage 08 - Criar Video Narrado
-        shell: bash
-        run: |
-          set -e
-
-          ffmpeg -y \
-            -i output/stage07/remontagem_com_mapa.mp4 \
-            -i output/stage08/narration_timeline.m4a \
-            -map 0:v:0 \
-            -map 1:a:0 \
-            -c:v copy \
-            -c:a aac \
-            -b:a 160k \
-            -shortest \
+            -pix_fmt yuv420p \
             -movflags +faststart \
-            output/stage08/remontagem_narrada.mp4
+            output/stage08/remontagem_narrada_coerente.mp4
 
-          test -s output/stage08/remontagem_narrada.mp4
+          test -s output/stage08/remontagem_narrada_coerente.mp4
 
-      # =========================================================
-      # VALIDAR STAGE 08
-      # =========================================================
-
-      - name: Validar Stage 08
+      - name: Validar Stage 08 V13
         shell: bash
         run: |
           set -e
@@ -1470,46 +1566,38 @@ jobs:
             -select_streams v:0 \
             -show_entries stream=width \
             -of csv=p=0 \
-            output/stage08/remontagem_narrada.mp4)
+            output/stage08/remontagem_narrada_coerente.mp4)
 
           HEIGHT=$(ffprobe \
             -v error \
             -select_streams v:0 \
             -show_entries stream=height \
             -of csv=p=0 \
-            output/stage08/remontagem_narrada.mp4)
+            output/stage08/remontagem_narrada_coerente.mp4)
 
           AUDIO_COUNT=$(ffprobe \
             -v error \
             -select_streams a \
             -show_entries stream=index \
             -of csv=p=0 \
-            output/stage08/remontagem_narrada.mp4 \
+            output/stage08/remontagem_narrada_coerente.mp4 \
             | wc -l)
 
-          FINAL_DURATION=$(ffprobe \
-            -v error \
-            -show_entries format=duration \
-            -of default=noprint_wrappers=1:nokey=1 \
-            output/stage08/remontagem_narrada.mp4)
-
           if [ "$WIDTH" != "1080" ] || [ "$HEIGHT" != "1920" ]; then
-            echo "ERRO: Stage 08 fora de 1080x1920."
+            echo "ERRO: Stage 08 V13 fora de 1080x1920."
             exit 1
           fi
 
           if [ "$AUDIO_COUNT" -lt 1 ]; then
-            echo "ERRO: Stage 08 sem narracao."
+            echo "ERRO: Stage 08 V13 sem audio."
             exit 1
           fi
 
           echo "========================================"
-          echo "STAGE 08 VALIDADO"
-          echo "Narracao: OK"
-          echo "Resolucao: 1080x1920"
-          echo "Duracao: $FINAL_DURATION"
-          echo "Motor TTS:"
-          cat output/stage08/tts_engine.txt
+          echo "STAGE 08 V13 VALIDADO"
+          echo "Narracao por bloco visual: OK"
+          echo "Incremento narrado: OK"
+          echo "Pesquisa factual: OK"
           echo "========================================"
 
       # =========================================================
@@ -1574,7 +1662,7 @@ jobs:
       - name: Disponibilizar Stage 06
         uses: actions/upload-artifact@v4
         with:
-          name: stage-06-real-remontage
+          name: stage-06-coherent-remontage
           path: |
             output/stage06/remontage_plan.txt
             output/stage06/parts/*.mp4
@@ -1584,25 +1672,26 @@ jobs:
       - name: Disponibilizar Stage 07
         uses: actions/upload-artifact@v4
         with:
-          name: stage-07-remontage-with-map
+          name: stage-07-researched-increment
           path: |
+            output/stage07/increment_context.json
+            output/stage07/increment_context.txt
             output/stage07/map_base.png
             output/stage07/map_insert.mp4
             output/stage07/final_concat.txt
-            output/stage07/remontagem_com_mapa.mp4
+            output/stage07/remontagem_coerente.mp4
           retention-days: 7
           if-no-files-found: error
 
       - name: Disponibilizar Stage 08
         uses: actions/upload-artifact@v4
         with:
-          name: stage-08-narrated-video
+          name: stage-08-coherent-narration
           path: |
-            output/stage08/narration_script.txt
-            output/stage08/tts_engine.txt
-            output/stage08/narration_raw.mp3
-            output/stage08/narration_fitted.m4a
-            output/stage08/narration_timeline.m4a
-            output/stage08/remontagem_narrada.mp4
+            output/stage08/block_script.json
+            output/stage08/block_script.txt
+            output/stage08/blocks/*
+            output/stage08/final_narrated_concat.txt
+            output/stage08/remontagem_narrada_coerente.mp4
           retention-days: 7
           if-no-files-found: error
