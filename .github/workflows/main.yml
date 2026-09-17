@@ -1,4 +1,4 @@
-name: Parece Mentira - Video Engine V15.6 Sincronismo Narracao Visual
+name: Parece Mentira - Video Engine V15.7 IA + Acabamento sem IA
 on:
   workflow_dispatch:
     inputs:
@@ -7,6 +7,14 @@ on:
         required: false
         type: string
         default: ""
+      etapa:
+        description: "Etapa do processamento"
+        required: true
+        type: choice
+        default: "COMPLETO_IA"
+        options:
+          - COMPLETO_IA
+          - ACABAMENTO_SEM_IA
       modo:
         description: "Modo de narracao"
         required: true
@@ -777,13 +785,14 @@ jobs:
       # =========================================================
 
       - name: Stage 06 - Instalar Gemini SDK
+        if: ${{ inputs.etapa != 'ACABAMENTO_SEM_IA' && inputs.modo != 'PLANO_MANUAL' }}
         shell: bash
         run: |
           set -e
           python3 -m pip install --upgrade google-genai
 
       - name: Stage 06 - AI Director Gemini
-        if: ${{ inputs.modo != 'PLANO_MANUAL' }}
+        if: ${{ inputs.etapa != 'ACABAMENTO_SEM_IA' && inputs.modo != 'PLANO_MANUAL' }}
         shell: bash
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -1387,7 +1396,7 @@ jobs:
       # =========================================================
 
       - name: Stage 06B - Carregar Plano Manual
-        if: ${{ inputs.modo == 'PLANO_MANUAL' }}
+        if: ${{ inputs.etapa != 'ACABAMENTO_SEM_IA' && inputs.modo == 'PLANO_MANUAL' }}
         shell: bash
         run: |
           set -e
@@ -1412,7 +1421,7 @@ jobs:
             > output/stage06_ai/provider.txt
 
       - name: Stage 06B - Validar Plano Manual
-        if: ${{ inputs.modo == 'PLANO_MANUAL' }}
+        if: ${{ inputs.etapa != 'ACABAMENTO_SEM_IA' && inputs.modo == 'PLANO_MANUAL' }}
         shell: bash
         run: |
           set -e
@@ -1581,6 +1590,173 @@ jobs:
           PY
 
           python3 /tmp/validate_manual_plan.py
+
+          test -s output/stage06_ai/director_plan.json
+          test -s output/stage06_ai/provider.txt
+
+      # =========================================================
+      # STAGE 06C - REUTILIZAR PLANO APROVADO
+      #
+      # Modo temporario para testes de acabamento:
+      # - NAO chama Gemini
+      # - NAO consome cota de IA
+      # - usa ./approved_plan.json salvo no repositorio
+      #
+      # Para criar approved_plan.json:
+      # 1. baixe director_plan.json de uma execucao AUTO aprovada
+      # 2. renomeie para approved_plan.json
+      # 3. envie para a raiz do repositorio
+      #
+      # Depois selecione:
+      # etapa = ACABAMENTO_SEM_IA
+      # =========================================================
+
+      - name: Stage 06C - Carregar Plano Aprovado sem IA
+        if: ${{ inputs.etapa == 'ACABAMENTO_SEM_IA' }}
+        shell: bash
+        run: |
+          set -e
+
+          if [ ! -s "./approved_plan.json" ]; then
+            echo "ERRO: etapa ACABAMENTO_SEM_IA selecionada."
+            echo "Arquivo ./approved_plan.json nao encontrado."
+            echo ""
+            echo "Baixe director_plan.json da execucao AUTO aprovada,"
+            echo "renomeie para approved_plan.json e envie para a raiz do repositorio."
+            exit 1
+          fi
+
+          mkdir -p output/stage06_ai
+
+          cp \
+            ./approved_plan.json \
+            output/stage06_ai/director_plan.json
+
+          cp \
+            ./approved_plan.json \
+            output/stage06_ai/director_raw.txt
+
+          echo "PLANO_APROVADO_SEM_IA" \
+            > output/stage06_ai/provider.txt
+
+          echo "========================================"
+          echo "PLANO APROVADO CARREGADO"
+          echo "Gemini: NAO EXECUTADO"
+          echo "Consumo de cota IA: ZERO"
+          echo "========================================"
+
+      - name: Stage 06C - Validar Plano Aprovado
+        if: ${{ inputs.etapa == 'ACABAMENTO_SEM_IA' }}
+        shell: bash
+        run: |
+          set -e
+
+          cat > /tmp/validate_approved_plan.py <<'PY'
+          import json
+          from pathlib import Path
+
+          plan_path = Path(
+              "output/stage06_ai/director_plan.json"
+          )
+
+          manifest_path = Path(
+              "output/stage05/scene_manifest.json"
+          )
+
+          plan = json.loads(
+              plan_path.read_text(
+                  encoding="utf-8"
+              )
+          )
+
+          manifest = json.loads(
+              manifest_path.read_text(
+                  encoding="utf-8"
+              )
+          )
+
+          timeline = plan.get(
+              "timeline",
+              []
+          )
+
+          if not isinstance(timeline, list) or not timeline:
+              raise RuntimeError(
+                  "approved_plan.json nao possui timeline valida."
+              )
+
+          valid_scenes = {
+              int(s["scene"])
+              for s in manifest
+          }
+
+          original_durations = {
+              int(s["scene"]): float(s["duration"])
+              for s in manifest
+          }
+
+          for idx, item in enumerate(
+              timeline,
+              start=1
+          ):
+              kind = item.get("kind")
+
+              if kind not in (
+                  "scene",
+                  "increment"
+              ):
+                  raise RuntimeError(
+                      f"Item {idx}: kind invalido ({kind})."
+                  )
+
+              duration = float(
+                  item.get("duration", 0)
+              )
+
+              if duration <= 0:
+                  raise RuntimeError(
+                      f"Item {idx}: duration invalida."
+                  )
+
+              if kind == "scene":
+                  scene = item.get("scene")
+
+                  if scene not in valid_scenes:
+                      raise RuntimeError(
+                          f"Item {idx}: cena {scene} nao existe neste video."
+                      )
+
+                  max_allowed = (
+                      original_durations[scene] * 1.10
+                  )
+
+                  if duration > max_allowed + 0.05:
+                      raise RuntimeError(
+                          f"Item {idx}: duracao da cena {scene} "
+                          f"ultrapassa o limite disponivel."
+                      )
+
+              if kind == "increment":
+                  item["scene"] = None
+
+          plan_path.write_text(
+              json.dumps(
+                  plan,
+                  ensure_ascii=False,
+                  indent=2
+              ),
+              encoding="utf-8"
+          )
+
+          print(
+              "PLANO APROVADO VALIDADO - SEM CHAMADA DE IA"
+          )
+          print(
+              f"Itens da timeline: {len(timeline)}"
+          )
+          PY
+
+          python3 /tmp/validate_approved_plan.py
 
           test -s output/stage06_ai/director_plan.json
           test -s output/stage06_ai/provider.txt
@@ -2267,12 +2443,13 @@ jobs:
           fi
 
           echo "========================================"
-          echo "V15.6 SINCRONISMO NARRACAO VISUAL VALIDADO"
+          echo "V15.7 IA + ACABAMENTO SEM IA VALIDADO"
           echo "Vision: OK"
           echo "Prompt opcional: OK"
           echo "Video sem narracao: suportado"
           echo "Diretor multimodal Gemini: suportado"
           echo "Plano manual sem IA: suportado"
+          echo "Reuso de plano aprovado sem Gemini: suportado"
           echo "Freeze final: removido"
           echo "========================================"
 
@@ -2344,5 +2521,7 @@ jobs:
             output/stage08/narration_raw.mp3
             output/stage08/narration_master.m4a
             output/stage08/final_ai_director.mp4
+            output/stage06_ai/director_plan.json
+            output/stage06_ai/provider.txt
           retention-days: 7
           if-no-files-found: warn
