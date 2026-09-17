@@ -1,4 +1,4 @@
-name: Parece Mentira - Render V1
+name: Parece Mentira - Render V2 Branding
 
 on:
   workflow_dispatch:
@@ -16,11 +16,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      - name: Localizar video
+      - name: Localizar arquivos
         run: |
-          echo "Arquivos encontrados:"
-          find . -maxdepth 2 -type f
-          
           VIDEO=$(find . -maxdepth 2 -type f -iname "*.mp4" | head -1)
 
           if [ -z "$VIDEO" ]; then
@@ -28,74 +25,111 @@ jobs:
             exit 1
           fi
 
+          if [ ! -f "logo_parece_mentira.png" ]; then
+            echo "ERRO: logo_parece_mentira.png nao encontrada."
+            exit 1
+          fi
+
           echo "VIDEO=$VIDEO" >> "$GITHUB_ENV"
-          echo "Video selecionado: $VIDEO"
+          echo "Video: $VIDEO"
+          echo "Logo encontrada."
 
       - name: Analisar original
         run: |
-          echo "===== VIDEO ORIGINAL ====="
           ffprobe -v error \
-            -show_entries format=duration,size \
-            -show_entries stream=index,codec_type,codec_name,width,height \
+            -show_entries format=duration \
+            -show_entries stream=codec_type,width,height \
             -of default=noprint_wrappers=1 \
             "$VIDEO"
 
-      - name: Renderizar V1
+      - name: Renderizar branding alternado
         run: |
           mkdir -p output
 
           ffmpeg -y \
             -i "$VIDEO" \
+            -i logo_parece_mentira.png \
+            -filter_complex "
+              [0:v]
+              scale=1080:1920:force_original_aspect_ratio=increase,
+              crop=1080:1920,
+              setsar=1
+              [base];
+
+              [1:v]
+              scale=180:180,
+              format=rgba
+              [logo];
+
+              [logo]
+              split=2
+              [logo_top][logo_bottom];
+
+              [base][logo_top]
+              overlay=
+                x=W-w-70:
+                y=180:
+                enable='lt(mod(t,18),8)',
+              [top];
+
+              [top][logo_bottom]
+              overlay=
+                x=70:
+                y=H-h-350:
+                enable='between(mod(t,18),9,17)'
+              [final]
+            " \
+            -map "[final]" \
             -an \
-            -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,drawbox=x=0:y=0:w=iw:h=14:color=white@0.85:t=fill" \
             -c:v libx264 \
             -preset medium \
             -crf 20 \
             -pix_fmt yuv420p \
             -movflags +faststart \
-            output/video_final_v1.mp4
+            output/video_final_v2.mp4
 
       - name: Validar resultado
         run: |
-          echo "===== VALIDACAO DO MP4 ====="
+          test -s output/video_final_v2.mp4
 
-          test -s output/video_final_v1.mp4
-
-          ffprobe -v error \
-            -show_entries format=duration,size \
-            -show_entries stream=index,codec_type,codec_name,width,height \
-            -of default=noprint_wrappers=1 \
-            output/video_final_v1.mp4
-
-          WIDTH=$(ffprobe -v error -select_streams v:0 \
+          WIDTH=$(ffprobe -v error \
+            -select_streams v:0 \
             -show_entries stream=width \
-            -of csv=p=0 output/video_final_v1.mp4)
+            -of csv=p=0 \
+            output/video_final_v2.mp4)
 
-          HEIGHT=$(ffprobe -v error -select_streams v:0 \
+          HEIGHT=$(ffprobe -v error \
+            -select_streams v:0 \
             -show_entries stream=height \
-            -of csv=p=0 output/video_final_v1.mp4)
+            -of csv=p=0 \
+            output/video_final_v2.mp4)
 
-          AUDIO=$(ffprobe -v error -select_streams a \
+          AUDIO=$(ffprobe -v error \
+            -select_streams a \
             -show_entries stream=index \
-            -of csv=p=0 output/video_final_v1.mp4)
+            -of csv=p=0 \
+            output/video_final_v2.mp4)
+
+          echo "Resolucao: ${WIDTH}x${HEIGHT}"
 
           if [ "$WIDTH" != "1080" ] || [ "$HEIGHT" != "1920" ]; then
-            echo "ERRO: resolucao final incorreta."
+            echo "ERRO: resolucao incorreta."
             exit 1
           fi
 
           if [ -n "$AUDIO" ]; then
-            echo "ERRO: o audio original ainda esta presente."
+            echo "ERRO: audio original presente."
             exit 1
           fi
 
-          echo "OK: MP4 criado."
-          echo "OK: 1080x1920."
-          echo "OK: audio original removido."
+          echo "================================="
+          echo "V2 VALIDADA"
+          echo "Branding alternado aplicado."
+          echo "================================="
 
       - name: Disponibilizar MP4
         uses: actions/upload-artifact@v4
         with:
-          name: parece-mentira-render-v1
-          path: output/video_final_v1.mp4
+          name: parece-mentira-render-v2
+          path: output/video_final_v2.mp4
           retention-days: 7
