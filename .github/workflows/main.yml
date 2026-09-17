@@ -1,4 +1,4 @@
-name: Parece Mentira - Video Engine V15.11 Trilha Original + Ducking
+name: Parece Mentira - Video Engine V15.12 Trilha Original + Ducking Corrigido
 on:
   workflow_dispatch:
     inputs:
@@ -2587,14 +2587,17 @@ jobs:
               -i output/stage08/final_ai_director.mp4 \
               -i output/stage09/original_bed.m4a \
               -filter_complex "\
-                [0:a]aformat=sample_rates=48000:channel_layouts=stereo,\
-                volume=1.0[voice];\
-                [1:a]aformat=sample_rates=48000:channel_layouts=stereo,\
+                [0:a]aresample=48000,\
+                aformat=sample_fmts=fltp:channel_layouts=stereo,\
+                volume=1.0,\
+                asplit=2[voice_mix][voice_sc];\
+                [1:a]aresample=48000,\
+                aformat=sample_fmts=fltp:channel_layouts=stereo,\
                 volume=0.22[bedpre];\
-                [bedpre][voice]sidechaincompress=\
+                [bedpre][voice_sc]sidechaincompress=\
                 threshold=0.018:ratio=10:attack=18:release=520:makeup=1[ducked];\
                 [ducked]volume=0.55[bedlow];\
-                [voice][bedlow]amix=inputs=2:duration=first:dropout_transition=0,\
+                [voice_mix][bedlow]amix=inputs=2:duration=first:dropout_transition=0,\
                 alimiter=limit=0.94[mix]" \
               -map 0:v:0 \
               -map "[mix]" \
@@ -2655,6 +2658,7 @@ jobs:
           echo "Trilha procedural original: SIM"
           echo "Volume de fundo: MUITO BAIXO"
           echo "Ducking durante locucao: ATIVO"
+          echo "Voz dividida para sidechain + mix: OK"
           echo "Fade-in / fade-out: ATIVOS"
           echo "Gemini usado neste stage: NAO"
           echo "========================================"
@@ -2701,7 +2705,7 @@ jobs:
           fi
 
           echo "========================================"
-          echo "V15.11 TRILHA ORIGINAL + DUCKING VALIDADO"
+          echo "V15.12 TRILHA ORIGINAL + DUCKING CORRIGIDO VALIDADO"
           echo "Vision: OK"
           echo "Prompt opcional: OK"
           echo "Video sem narracao: suportado"
