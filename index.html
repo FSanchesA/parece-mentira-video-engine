@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#0f2f2b" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Parece Mentira" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <title>Parece Mentira</title>
+  <link rel="stylesheet" href="styles.css?v=2" />
+</head>
+<body>
+  <main class="app-shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">VIDEO ENGINE</p>
+        <h1>Parece Mentira</h1>
+        <p class="sub">Envie o vídeo, defina o contexto e mande editar.</p>
+      </div>
+      <div class="status-pill" id="apiStatus">Verificando backend...</div>
+    </header>
+
+    <section class="card access-card hidden" id="accessCard">
+      <p class="eyebrow">ACESSO</p>
+      <h2>Conectar este aparelho</h2>
+      <p class="muted access-help">Digite a mesma APP_KEY que você salvou como segredo no Cloudflare. Ela ficará apenas neste aparelho.</p>
+      <div class="access-row">
+        <input id="appKeyInput" type="password" autocomplete="off" placeholder="APP_KEY" />
+        <button class="secondary" id="saveKeyBtn" type="button">Salvar chave</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <label class="upload-box" for="videoInput">
+        <input id="videoInput" type="file" accept="video/mp4,video/quicktime,video/x-m4v,video/*" hidden />
+        <span class="upload-icon">＋</span>
+        <strong>Selecionar vídeo</strong>
+        <small id="fileName">MP4, MOV ou vídeo do iPhone • até 100 MB</small>
+      </label>
+
+      <div class="field-group">
+        <label for="contexto">Contexto do episódio</label>
+        <textarea id="contexto" rows="4" placeholder="Ex.: história real de um pouso de emergência. Priorizar suspense e manter ritmo rápido."></textarea>
+      </div>
+
+      <div class="grid-2">
+        <div class="field-group">
+          <label for="modo">Narração</label>
+          <select id="modo">
+            <option value="AUTO" selected>Automática</option>
+            <option value="ORIGINAL">Original</option>
+            <option value="NOVA">Nova</option>
+            <option value="SEM_NARRACAO">Sem narração</option>
+          </select>
+        </div>
+
+        <div class="field-group">
+          <label for="etapa">Processamento</label>
+          <select id="etapa">
+            <option value="COMPLETO_IA" selected>Completo IA</option>
+            <option value="ACABAMENTO_SEM_IA">Acabamento sem IA</option>
+          </select>
+        </div>
+      </div>
+
+      <button class="primary" id="editBtn">Editar vídeo</button>
+      <button class="text-button" id="changeKeyBtn" type="button">Trocar chave deste aparelho</button>
+    </section>
+
+    <section class="card hidden" id="progressCard">
+      <div class="progress-head">
+        <div>
+          <p class="eyebrow">PROCESSAMENTO</p>
+          <h2 id="progressTitle">Preparando...</h2>
+        </div>
+        <span id="progressPercent">0%</span>
+      </div>
+      <div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
+      <p class="muted" id="progressDetail">Aguardando início.</p>
+    </section>
+
+    <section class="card hidden" id="resultCard">
+      <p class="eyebrow">MASTER FINAL</p>
+      <h2>Vídeo pronto</h2>
+      <video id="preview" controls playsinline></video>
+      <a class="primary link-btn" id="downloadBtn" href="#" download="final_master.mp4">Baixar final_master.mp4</a>
+    </section>
+
+    <footer>
+      <span>V2 mobile • PWA • backend conectado</span>
+    </footer>
+  </main>
+
+  <script src="app.js?v=2"></script>
+</body>
+</html>
