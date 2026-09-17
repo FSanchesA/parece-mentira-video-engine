@@ -1,0 +1,97 @@
+{
+  "story_summary": "O capitão Scott Burke conseguiu pousar um avião com os pneus dianteiros travados de lado, salvando todos os 146 passageiros que assistiam à própria emergência ao vivo pela TV a bordo.",
+  "mode_used": "AUTO",
+  "research_notes": [
+    {
+      "fact": "Pouso de emergência do voo JetBlue 292 com trem de pouso dianteiro travado a 90 graus.",
+      "source": "Contexto do evento retratado na transcrição original"
+    }
+  ],
+  "increment": {
+    "type": "none",
+    "title": "",
+    "subtitle": "",
+    "duration": 0,
+    "narration": "",
+    "points": []
+  },
+  "timeline": [
+    {
+      "kind": "scene",
+      "scene": 1,
+      "duration": 6.0,
+      "narration": "Em pleno voo, o piloto percebeu que as rodas dianteiras travaram viradas.",
+      "reason": "Apresenta o problema técnico inicial de forma direta, casando com as legendas visíveis de rodas travadas."
+    },
+    {
+      "kind": "scene",
+      "scene": 2,
+      "duration": 4.0,
+      "narration": "Pousar assim significava um risco enorme de colisão.",
+      "reason": "Mostra o risco iminente no solo, aproveitando o enquadramento de atrito e as legendas sobre a tentativa de pouso."
+    },
+    {
+      "kind": "scene",
+      "scene": 3,
+      "duration": 2.2,
+      "narration": "Outros pilotos entrariam em pânico,",
+      "reason": "Cria tensão inicial com o ponto de vista da cabine de comando."
+    },
+    {
+      "kind": "scene",
+      "scene": 4,
+      "duration": 2.64,
+      "narration": "mas o capitão Scott Burke manteve a calma.",
+      "reason": "Apresenta o piloto responsável mantendo alinhamento com a legenda que exibe seu nome."
+    },
+    {
+      "kind": "scene",
+      "scene": 5,
+      "duration": 1.98,
+      "narration": "Como o avião estava pesado,",
+      "reason": "Estabelece a complicação do excesso de peso com a imagem da aeronave no ar."
+    },
+    {
+      "kind": "scene",
+      "scene": 6,
+      "duration": 6.5,
+      "narration": "ele circulou por duas horas queimando combustível para tentar o pouso.",
+      "reason": "Corta o excesso de 24 segundos da cena original, mantendo apenas o trecho necessário para explicar a espera e a queima de combustível."
+    },
+    {
+      "kind": "scene",
+      "scene": 7,
+      "duration": 4.5,
+      "narration": "Na cabine, os passageiros viam a transmissão ao vivo,",
+      "reason": "Muda o foco para o interior da aeronave, conectando com as telas e a legenda visível."
+    },
+    {
+      "kind": "scene",
+      "scene": 8,
+      "duration": 1.723,
+      "narration": "vendo a cobertura do pânico,",
+      "reason": "Destaca a reação emocional individual da passageira angustiada na janela."
+    },
+    {
+      "kind": "scene",
+      "scene": 9,
+      "duration": 3.0,
+      "narration": "muitos choravam achando ser o fim.",
+      "reason": "Associa a imagem da aproximação ao vivo na TV ao desespero a bordo."
+    },
+    {
+      "kind": "scene",
+      "scene": 10,
+      "duration": 8.0,
+      "narration": "Com extrema precisão, o capitão segurou o nariz do avião até desacelerar em segurança.",
+      "reason": "Edita a cena longa de 27s para um trecho dinâmico focado no momento crítico do toque e atrito das rodas no solo."
+    },
+    {
+      "kind": "scene",
+      "scene": 11,
+      "duration": 4.4,
+      "narration": "Todos os 146 passageiros saíram ilesos. Parece mentira. Mas aconteceu.",
+      "reason": "Encerra o episódio com o desfecho positivo e a marca registrada do canal sobre o selo final."
+    }
+  ]
+}
