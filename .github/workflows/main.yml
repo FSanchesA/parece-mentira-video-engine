@@ -1,10 +1,10 @@
-name: Teste FFmpeg
+name: Parece Mentira - Render V1
 
 on:
   workflow_dispatch:
 
 jobs:
-  teste-ffmpeg:
+  render-video:
     runs-on: ubuntu-latest
 
     steps:
@@ -16,17 +16,86 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      - name: Verificar FFmpeg
+      - name: Localizar video
         run: |
-          echo "========================================"
-          echo "PARECE MENTIRA VIDEO ENGINE"
-          echo "Testando FFmpeg..."
-          echo "========================================"
+          echo "Arquivos encontrados:"
+          find . -maxdepth 2 -type f
+          
+          VIDEO=$(find . -maxdepth 2 -type f -iname "*.mp4" | head -1)
 
-          ffmpeg -version
-          ffprobe -version
+          if [ -z "$VIDEO" ]; then
+            echo "ERRO: nenhum MP4 encontrado."
+            exit 1
+          fi
 
-          echo "========================================"
-          echo "FFmpeg funcionando corretamente!"
-          echo "Motor de video pronto."
-          echo "========================================"
+          echo "VIDEO=$VIDEO" >> "$GITHUB_ENV"
+          echo "Video selecionado: $VIDEO"
+
+      - name: Analisar original
+        run: |
+          echo "===== VIDEO ORIGINAL ====="
+          ffprobe -v error \
+            -show_entries format=duration,size \
+            -show_entries stream=index,codec_type,codec_name,width,height \
+            -of default=noprint_wrappers=1 \
+            "$VIDEO"
+
+      - name: Renderizar V1
+        run: |
+          mkdir -p output
+
+          ffmpeg -y \
+            -i "$VIDEO" \
+            -an \
+            -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,drawbox=x=0:y=0:w=iw:h=14:color=white@0.85:t=fill" \
+            -c:v libx264 \
+            -preset medium \
+            -crf 20 \
+            -pix_fmt yuv420p \
+            -movflags +faststart \
+            output/video_final_v1.mp4
+
+      - name: Validar resultado
+        run: |
+          echo "===== VALIDACAO DO MP4 ====="
+
+          test -s output/video_final_v1.mp4
+
+          ffprobe -v error \
+            -show_entries format=duration,size \
+            -show_entries stream=index,codec_type,codec_name,width,height \
+            -of default=noprint_wrappers=1 \
+            output/video_final_v1.mp4
+
+          WIDTH=$(ffprobe -v error -select_streams v:0 \
+            -show_entries stream=width \
+            -of csv=p=0 output/video_final_v1.mp4)
+
+          HEIGHT=$(ffprobe -v error -select_streams v:0 \
+            -show_entries stream=height \
+            -of csv=p=0 output/video_final_v1.mp4)
+
+          AUDIO=$(ffprobe -v error -select_streams a \
+            -show_entries stream=index \
+            -of csv=p=0 output/video_final_v1.mp4)
+
+          if [ "$WIDTH" != "1080" ] || [ "$HEIGHT" != "1920" ]; then
+            echo "ERRO: resolucao final incorreta."
+            exit 1
+          fi
+
+          if [ -n "$AUDIO" ]; then
+            echo "ERRO: o audio original ainda esta presente."
+            exit 1
+          fi
+
+          echo "OK: MP4 criado."
+          echo "OK: 1080x1920."
+          echo "OK: audio original removido."
+
+      - name: Disponibilizar MP4
+        uses: actions/upload-artifact@v4
+        with:
+          name: parece-mentira-render-v1
+          path: output/video_final_v1.mp4
+          retention-days: 7
