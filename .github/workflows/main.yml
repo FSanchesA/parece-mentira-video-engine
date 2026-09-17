@@ -1,5 +1,4 @@
-name: Parece Mentira - Video Engine V9
-
+name: Parece Mentira - Video Engine V10
 on:
   workflow_dispatch:
 
@@ -10,8 +9,7 @@ concurrency:
 jobs:
   render-video:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-
+    timeout-minutes: 35
     steps:
 
       # =========================================================
@@ -737,6 +735,220 @@ jobs:
           echo "========================================"
 
       # =========================================================
+      # STAGE 06 - DIRETOR EDITORIAL
+      # =========================================================
+
+      - name: Stage 06 - Criar Plano Editorial
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p output/stage06
+
+          cat > /tmp/director.py <<'PYCODE'
+          import csv
+          import json
+          import re
+          from pathlib import Path
+
+          manifest_path = Path("output/stage05/scene_manifest.json")
+
+          with manifest_path.open("r", encoding="utf-8") as f:
+              scenes = json.load(f)
+
+          if not scenes:
+              raise SystemExit("Manifesto de cenas vazio.")
+
+          MAP_KEYWORDS = [
+              "rota", "trajeto", "voando em círculos", "voando em circulos",
+              "círculos", "circulos", "aeroporto", "cidade", "país", "pais",
+              "oceano", "ilha", "fronteira", "distância", "distancia",
+              "quilômetros", "quilometros", "km", "local", "região", "regiao",
+              "combustível", "combustivel"
+          ]
+
+          CLIMAX_KEYWORDS = [
+              "sobreviveu", "sobreviveram", "ileso", "ilesos", "pous",
+              "impacto", "explod", "colid", "resgat", "salvou", "conseguiu"
+          ]
+
+          TENSION_KEYWORDS = [
+              "pânico", "panico", "chorar", "últimos momentos",
+              "ultimos momentos", "morrer", "matando", "risco", "difícil",
+              "dificil", "defeituoso", "defeituosos"
+          ]
+
+          def norm(text):
+              return re.sub(r"\s+", " ", (text or "").strip().lower())
+
+          for i, scene in enumerate(scenes):
+              text = norm(scene.get("transcript", ""))
+              duration = float(scene.get("duration", 0))
+              is_last = i == len(scenes) - 1
+
+              role = "narrative"
+
+              if not text:
+                  if is_last:
+                      role = "outro"
+                  elif duration <= 3.0:
+                      role = "broll_optional"
+                  else:
+                      role = "visual"
+              elif i <= 1:
+                  role = "hook"
+              elif any(k in text for k in CLIMAX_KEYWORDS):
+                  role = "climax"
+              elif any(k in text for k in TENSION_KEYWORDS):
+                  role = "tension"
+
+              scene["role"] = role
+
+          primary = [s for s in scenes if s["role"] != "broll_optional"]
+          optional_broll = [s for s in scenes if s["role"] == "broll_optional"]
+
+          map_candidates = []
+          for scene in scenes:
+              text = norm(scene.get("transcript", ""))
+              score = sum(1 for k in MAP_KEYWORDS if k in text)
+              if score:
+                  map_candidates.append((score, float(scene.get("duration", 0)), scene))
+
+          if map_candidates:
+              map_candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
+              enhancement_scene = map_candidates[0][2]
+              enhancement = {
+                  "count": 1,
+                  "type": "map_animation",
+                  "scene": enhancement_scene["scene"],
+                  "source_file": enhancement_scene["file"],
+                  "target_duration_seconds": 4.5,
+                  "instruction": "Criar um unico mapa animado contextual, com zoom progressivo e movimento/rota apenas quando a narrativa sustentar essa informacao. O mapa deve substituir temporariamente a imagem do video, sem interromper a futura narracao.",
+                  "reason": enhancement_scene.get("transcript", "")
+              }
+          else:
+              spoken = [s for s in scenes if norm(s.get("transcript", ""))]
+              enhancement_scene = max(spoken, key=lambda s: float(s.get("duration", 0)), default=scenes[0])
+              enhancement = {
+                  "count": 1,
+                  "type": "real_web_image",
+                  "scene": enhancement_scene["scene"],
+                  "source_file": enhancement_scene["file"],
+                  "target_duration_seconds": 4.0,
+                  "instruction": "Buscar uma unica imagem real complementar, relevante e com licenca adequada, para enriquecer este ponto da historia.",
+                  "reason": enhancement_scene.get("transcript", "")
+              }
+
+          plan = {
+              "version": "stage06-v1",
+              "strategy": "Preservar a ordem semantica nesta primeira remontagem, eliminando apenas respiros visuais mudos muito curtos. O rearranjo agressivo fica condicionado a futura narracao.",
+              "primary_order": [s["scene"] for s in primary],
+              "optional_broll": [s["scene"] for s in optional_broll],
+              "enhancement": enhancement,
+              "scenes": scenes
+          }
+
+          with open("output/stage06/director_plan.json", "w", encoding="utf-8") as f:
+              json.dump(plan, f, ensure_ascii=False, indent=2)
+
+          with open("output/stage06/director_plan.csv", "w", encoding="utf-8", newline="") as f:
+              writer = csv.writer(f)
+              writer.writerow(["scene","role","start","end","duration","file","use_in_primary_cut","transcript"])
+              primary_ids = set(plan["primary_order"])
+              for scene in scenes:
+                  writer.writerow([
+                      f"{scene['scene']:03d}", scene["role"], scene["start"], scene["end"],
+                      scene["duration"], scene["file"],
+                      "yes" if scene["scene"] in primary_ids else "optional",
+                      scene.get("transcript", "")
+                  ])
+
+          with open("output/stage06/director_plan.txt", "w", encoding="utf-8") as f:
+              f.write("PARECE MENTIRA - DIRETOR EDITORIAL\n")
+              f.write("========================================\n\n")
+              f.write("ORDEM PRINCIPAL\n")
+              f.write(" -> ".join(f"{n:03d}" for n in plan["primary_order"]) + "\n\n")
+              f.write("B-ROLL OPCIONAL\n")
+              f.write((", ".join(f"{n:03d}" for n in plan["optional_broll"]) if plan["optional_broll"] else "Nenhum") + "\n\n")
+              e = plan["enhancement"]
+              f.write("INCREMENTO EXTERNO\n")
+              f.write(f"Quantidade: {e['count']}\n")
+              f.write(f"Tipo: {e['type']}\n")
+              f.write(f"Cena: {e['scene']:03d}\n")
+              f.write(f"Duracao alvo: {e['target_duration_seconds']:.1f}s\n")
+              f.write(f"Instrucao: {e['instruction']}\n")
+              f.write(f"Contexto: {e['reason']}\n\n")
+              f.write("CLASSIFICACAO DAS CENAS\n")
+              f.write("----------------------------------------\n")
+              for scene in scenes:
+                  f.write(f"CENA {scene['scene']:03d} | {scene['role']} | {scene['duration']:.3f}s\n")
+                  f.write(f"Fala: {scene.get('transcript') or '[sem fala]'}\n")
+                  f.write("----------------------------------------\n")
+
+          clips_dir = Path("output/stage04_clips")
+          with open("output/stage06/rough_cut_concat.txt", "w", encoding="utf-8") as f:
+              for scene in primary:
+                  clip = (clips_dir / f"scene_{scene['scene']:03d}.mp4").resolve()
+                  if not clip.exists():
+                      raise SystemExit(f"Clip ausente: {clip}")
+                  f.write("file '" + str(clip).replace("'", "'\''") + "'\n")
+
+          print("========================================")
+          print("STAGE 06 - DIRETOR EDITORIAL")
+          print("========================================")
+          print("Ordem principal:", plan["primary_order"])
+          print("B-roll opcional:", plan["optional_broll"])
+          print("Incremento:", enhancement["type"], "na cena", enhancement["scene"])
+          PYCODE
+
+          python3 /tmp/director.py
+
+          test -s output/stage06/director_plan.json
+          test -s output/stage06/director_plan.csv
+          test -s output/stage06/director_plan.txt
+          test -s output/stage06/rough_cut_concat.txt
+
+      - name: Stage 06 - Renderizar Rough Cut
+        shell: bash
+        run: |
+          set -e
+
+          ffmpeg -y             -f concat             -safe 0             -i output/stage06/rough_cut_concat.txt             -an             -c:v libx264             -preset veryfast             -crf 20             -pix_fmt yuv420p             -movflags +faststart             output/stage06/rough_cut.mp4
+
+          test -s output/stage06/rough_cut.mp4
+
+      - name: Validar Stage 06
+        shell: bash
+        run: |
+          set -e
+
+          ROUGH_DURATION=$(ffprobe             -v error             -show_entries format=duration             -of default=noprint_wrappers=1:nokey=1             output/stage06/rough_cut.mp4)
+
+          WIDTH=$(ffprobe             -v error             -select_streams v:0             -show_entries stream=width             -of csv=p=0             output/stage06/rough_cut.mp4)
+
+          HEIGHT=$(ffprobe             -v error             -select_streams v:0             -show_entries stream=height             -of csv=p=0             output/stage06/rough_cut.mp4)
+
+          AUDIO_COUNT=$(ffprobe             -v error             -select_streams a             -show_entries stream=index             -of csv=p=0             output/stage06/rough_cut.mp4             | wc -l)
+
+          if [ "$WIDTH" != "1080" ] || [ "$HEIGHT" != "1920" ]; then
+            echo "ERRO: Rough Cut fora de 1080x1920."
+            exit 1
+          fi
+
+          if [ "$AUDIO_COUNT" -ne 0 ]; then
+            echo "ERRO: Rough Cut possui audio."
+            exit 1
+          fi
+
+          echo "========================================"
+          echo "STAGE 06 VALIDADO"
+          echo "Duracao Rough Cut: $ROUGH_DURATION"
+          echo "1080x1920: OK"
+          echo "Audio: removido"
+          echo "Plano editorial: OK"
+          echo "========================================"
+
+      # =========================================================
       # ARTIFACTS
       # =========================================================
 
@@ -792,5 +1004,18 @@ jobs:
             output/stage05/scene_manifest.txt
             output/stage05/scene_manifest.csv
             output/stage05/scene_manifest.json
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Disponibilizar Stage 06
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-06-editorial-director
+          path: |
+            output/stage06/director_plan.txt
+            output/stage06/director_plan.csv
+            output/stage06/director_plan.json
+            output/stage06/rough_cut_concat.txt
+            output/stage06/rough_cut.mp4
           retention-days: 7
           if-no-files-found: error
