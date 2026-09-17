@@ -1,4 +1,4 @@
-name: Parece Mentira - Video Engine V15.2 Gemini Resilient Director
+name: Parece Mentira - Video Engine V15.3 Auto + Plano Manual
 on:
   workflow_dispatch:
     inputs:
@@ -17,6 +17,7 @@ on:
           - ORIGINAL
           - NOVA
           - SEM_NARRACAO
+          - PLANO_MANUAL
 concurrency:
   group: parece-mentira-video-engine
   cancel-in-progress: true
@@ -782,6 +783,7 @@ jobs:
           python3 -m pip install --upgrade google-genai
 
       - name: Stage 06 - AI Director Gemini
+        if: ${{ inputs.modo != 'PLANO_MANUAL' }}
         shell: bash
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -1235,6 +1237,218 @@ jobs:
           PY
 
           python3 /tmp/ai_director_gemini.py
+
+          test -s output/stage06_ai/director_plan.json
+          test -s output/stage06_ai/provider.txt
+
+      # =========================================================
+      # STAGE 06B - PLANO MANUAL
+      #
+      # Quando modo=PLANO_MANUAL:
+      # - ignora completamente o Gemini
+      # - le ./manual_plan.json do repositorio
+      # - valida estrutura, cenas e duracoes
+      # - copia o plano para o mesmo local usado pelo restante
+      #   do pipeline
+      #
+      # Assim o GitHub/FFmpeg vira apenas EXECUTOR do plano.
+      # =========================================================
+
+      - name: Stage 06B - Carregar Plano Manual
+        if: ${{ inputs.modo == 'PLANO_MANUAL' }}
+        shell: bash
+        run: |
+          set -e
+
+          if [ ! -s "./manual_plan.json" ]; then
+            echo "ERRO: modo PLANO_MANUAL selecionado, mas manual_plan.json nao existe."
+            echo "Adicione manual_plan.json na raiz do repositorio."
+            exit 1
+          fi
+
+          mkdir -p output/stage06_ai
+
+          cp \
+            ./manual_plan.json \
+            output/stage06_ai/director_plan.json
+
+          cp \
+            ./manual_plan.json \
+            output/stage06_ai/director_raw.txt
+
+          echo "PLANO_MANUAL" \
+            > output/stage06_ai/provider.txt
+
+      - name: Stage 06B - Validar Plano Manual
+        if: ${{ inputs.modo == 'PLANO_MANUAL' }}
+        shell: bash
+        run: |
+          set -e
+
+          cat > /tmp/validate_manual_plan.py <<'PY'
+          import json
+          from pathlib import Path
+
+          plan_path = Path(
+              "output/stage06_ai/director_plan.json"
+          )
+
+          manifest_path = Path(
+              "output/stage05/scene_manifest.json"
+          )
+
+          plan = json.loads(
+              plan_path.read_text(
+                  encoding="utf-8"
+              )
+          )
+
+          manifest = json.loads(
+              manifest_path.read_text(
+                  encoding="utf-8"
+              )
+          )
+
+          if not isinstance(plan, dict):
+              raise RuntimeError(
+                  "manual_plan.json precisa ser um objeto JSON."
+              )
+
+          timeline = plan.get(
+              "timeline",
+              []
+          )
+
+          if not isinstance(timeline, list) or not timeline:
+              raise RuntimeError(
+                  "manual_plan.json precisa conter timeline com pelo menos 1 item."
+              )
+
+          valid_scenes = {
+              int(s["scene"])
+              for s in manifest
+          }
+
+          original_durations = {
+              int(s["scene"]): float(s["duration"])
+              for s in manifest
+          }
+
+          increment = plan.get(
+              "increment",
+              {}
+          ) or {}
+
+          inc_type = increment.get(
+              "type",
+              "none"
+          )
+
+          if inc_type not in (
+              "none",
+              "map",
+              "fact_card"
+          ):
+              raise RuntimeError(
+                  f"increment.type invalido: {inc_type}"
+              )
+
+          for idx, item in enumerate(
+              timeline,
+              start=1
+          ):
+              if not isinstance(item, dict):
+                  raise RuntimeError(
+                      f"timeline item {idx} invalido."
+                  )
+
+              kind = item.get("kind")
+
+              if kind not in (
+                  "scene",
+                  "increment"
+              ):
+                  raise RuntimeError(
+                      f"timeline item {idx}: kind invalido ({kind})."
+                  )
+
+              try:
+                  duration = float(
+                      item.get(
+                          "duration",
+                          0
+                      )
+                  )
+              except Exception:
+                  raise RuntimeError(
+                      f"timeline item {idx}: duration invalida."
+                  )
+
+              if duration <= 0:
+                  raise RuntimeError(
+                      f"timeline item {idx}: duration deve ser > 0."
+                  )
+
+              if kind == "scene":
+                  scene = item.get(
+                      "scene"
+                  )
+
+                  if scene not in valid_scenes:
+                      raise RuntimeError(
+                          f"timeline item {idx}: cena inexistente ({scene})."
+                      )
+
+                  max_allowed = (
+                      original_durations[scene] * 1.10
+                  )
+
+                  if duration > max_allowed + 0.05:
+                      raise RuntimeError(
+                          f"timeline item {idx}: duracao {duration:.2f}s "
+                          f"ultrapassa 110% da cena {scene:03d} "
+                          f"({max_allowed:.2f}s)."
+                      )
+
+              if kind == "increment":
+                  item["scene"] = None
+
+          plan["mode_used"] = "PLANO_MANUAL"
+
+          if "story_summary" not in plan:
+              plan["story_summary"] = ""
+
+          if "research_notes" not in plan:
+              plan["research_notes"] = []
+
+          if "increment" not in plan:
+              plan["increment"] = {
+                  "type": "none",
+                  "title": "",
+                  "subtitle": "",
+                  "duration": 0,
+                  "narration": "",
+                  "points": []
+              }
+
+          plan_path.write_text(
+              json.dumps(
+                  plan,
+                  ensure_ascii=False,
+                  indent=2
+              ),
+              encoding="utf-8"
+          )
+
+          print(
+              "PLANO MANUAL VALIDADO"
+          )
+          print(
+              f"Itens da timeline: {len(timeline)}"
+          )
+          PY
+
+          python3 /tmp/validate_manual_plan.py
 
           test -s output/stage06_ai/director_plan.json
           test -s output/stage06_ai/provider.txt
@@ -1915,11 +2129,12 @@ jobs:
           fi
 
           echo "========================================"
-          echo "V15.2 GEMINI RESILIENT DIRECTOR VALIDADO"
+          echo "V15.3 AUTO + PLANO MANUAL VALIDADO"
           echo "Vision: OK"
           echo "Prompt opcional: OK"
           echo "Video sem narracao: suportado"
-          echo "Diretor multimodal Gemini: OK"
+          echo "Diretor multimodal Gemini: suportado"
+          echo "Plano manual sem IA: suportado"
           echo "Freeze final: removido"
           echo "========================================"
 
@@ -1983,7 +2198,7 @@ jobs:
       - name: Disponibilizar Final V15
         uses: actions/upload-artifact@v4
         with:
-          name: stage-08-gemini-director-final
+          name: stage-08-final
           path: |
             output/stage07/ai_visual_master.mp4
             output/stage08/narration.txt
