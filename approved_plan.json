@@ -1,0 +1,94 @@
+{
+  "story_summary": "O capitão Scott Burke realiza um pouso de emergência com os pneus dianteiros travados de lado, salvando todos os 146 passageiros ao vivo na TV.",
+  "mode_used": "AUTO",
+  "research_notes": [
+    {
+      "fact": "Capitão Scott Burke manteve a calma e queimou combustível por duas horas antes do pouso.",
+      "source": "Transcrição original"
+    },
+    {
+      "fact": "Passageiros assistiram ao vivo pela TV a bordo e 146 pessoas sobreviveram ilesas.",
+      "source": "Transcrição original"
+    }
+  ],
+  "increment": {
+    "type": "none",
+    "title": "",
+    "subtitle": "",
+    "duration": 0,
+    "narration": "",
+    "points": []
+  },
+  "timeline": [
+    {
+      "kind": "scene",
+      "scene": 1,
+      "duration": 5.527,
+      "narration": "Os pneus dianteiros deste avião travaram de lado durante o voo.",
+      "reason": "Apresenta o problema técnico e o perigo iminente com a indicação visual dos pneus."
+    },
+    {
+      "kind": "scene",
+      "scene": 3,
+      "duration": 2.2,
+      "narration": "Enquanto outros entrariam em pânico,",
+      "reason": "Mostra a visão do cockpit para criar imersão na cabine de comando."
+    },
+    {
+      "kind": "scene",
+      "scene": 4,
+      "duration": 2.64,
+      "narration": "o capitão Scott Burke manteve a calma.",
+      "reason": "Conecta diretamente a fala ao rosto do piloto Scott Burke."
+    },
+    {
+      "kind": "scene",
+      "scene": 5,
+      "duration": 1.98,
+      "narration": "Ele voou por duas horas...",
+      "reason": "Ilustra o avião alternando altitude para preparar a manobra."
+    },
+    {
+      "kind": "scene",
+      "scene": 6,
+      "duration": 5.0,
+      "narration": "...para queimar combustível antes de tentar o pouso.",
+      "reason": "Corta a tomada longa de 24s para focar apenas na aproximação essencial."
+    },
+    {
+      "kind": "scene",
+      "scene": 7,
+      "duration": 5.527,
+      "narration": "A bordo, os passageiros assistiam a tudo ao vivo pela TV.",
+      "reason": "Mostra o interior do avião com os monitores ligados, elevando a tensão."
+    },
+    {
+      "kind": "scene",
+      "scene": 8,
+      "duration": 1.723,
+      "narration": "Muitos choravam de medo.",
+      "reason": "Garante apelo emocional com o close na passageira apreensiva."
+    },
+    {
+      "kind": "scene",
+      "scene": 9,
+      "duration": 3.373,
+      "narration": "O capitão iniciou o pouso com extrema precisão.",
+      "reason": "Mostra o alinhamento crítico da aeronave tocando a pista."
+    },
+    {
+      "kind": "scene",
+      "scene": 10,
+      "duration": 8.0,
+      "narration": "Ao tocar a pista, a técnica perfeita evitou a tragédia. Todos os 146 passageiros saíram ilesos.",
+      "reason": "Resume a longa tomada do pouso no momento exato do impacto e frenagem bem-sucedida."
+    },
+    {
+      "kind": "scene",
+      "scene": 11,
+      "duration": 3.0,
+      "narration": "Parece mentira. Mas aconteceu.",
+      "reason": "Finaliza com o selo do canal sobre a imagem do avião em segurança."
+    }
+  ]
+}
