@@ -1,4 +1,4 @@
-name: Parece Mentira - Video Engine V15.18 Acabamento Visual
+name: Parece Mentira - Video Engine V15.19 QA Tecnico Automatico
 on:
   workflow_dispatch:
     inputs:
@@ -2651,6 +2651,492 @@ jobs:
           if-no-files-found: error
 
       # =========================================================
+      # STAGE 10 - QA TECNICO AUTOMATICO
+      #
+      # Valida o master final sem alterar imagem ou audio.
+      #
+      # HARD FAIL:
+      # - arquivo ausente/corrompido
+      # - resolucao diferente de 1080x1920
+      # - codec de video inesperado
+      # - fps fora do esperado
+      # - duracao alterada
+      # - audio ausente quando deveria existir
+      # - audio praticamente inaudivel
+      # - erro de decodificacao
+      #
+      # SO RELATORIO:
+      # - quadros congelados
+      # - trechos pretos
+      # - silêncios
+      #
+      # Ao final, copia o video APROVADO para:
+      # output/stage10/final_master.mp4
+      # =========================================================
+
+      - name: Stage 10 - Executar QA Tecnico
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p output/stage10
+
+          INPUT="output/stage09/final_visual_polish.mp4"
+          REFERENCE="output/stage08/final_ai_director.mp4"
+          REPORT="output/stage10/qa_report.txt"
+
+          test -s "$INPUT"
+          test -s "$REFERENCE"
+
+          : > "$REPORT"
+
+          echo "PARECE MENTIRA - QA TECNICO AUTOMATICO" | tee -a "$REPORT"
+          echo "========================================" | tee -a "$REPORT"
+
+          # -----------------------------------------------------
+          # METADADOS PRINCIPAIS
+          # -----------------------------------------------------
+
+          WIDTH=$(ffprobe \
+            -v error \
+            -select_streams v:0 \
+            -show_entries stream=width \
+            -of csv=p=0 \
+            "$INPUT")
+
+          HEIGHT=$(ffprobe \
+            -v error \
+            -select_streams v:0 \
+            -show_entries stream=height \
+            -of csv=p=0 \
+            "$INPUT")
+
+          CODEC=$(ffprobe \
+            -v error \
+            -select_streams v:0 \
+            -show_entries stream=codec_name \
+            -of csv=p=0 \
+            "$INPUT")
+
+          PIX_FMT=$(ffprobe \
+            -v error \
+            -select_streams v:0 \
+            -show_entries stream=pix_fmt \
+            -of csv=p=0 \
+            "$INPUT")
+
+          FPS_RAW=$(ffprobe \
+            -v error \
+            -select_streams v:0 \
+            -show_entries stream=avg_frame_rate \
+            -of csv=p=0 \
+            "$INPUT")
+
+          FPS=$(awk \
+            -v r="$FPS_RAW" \
+            'BEGIN {
+              split(r,a,"/");
+              if (a[2] == 0 || a[2] == "") print 0;
+              else printf "%.3f", a[1]/a[2]
+            }')
+
+          DURATION=$(ffprobe \
+            -v error \
+            -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 \
+            "$INPUT")
+
+          REF_DURATION=$(ffprobe \
+            -v error \
+            -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 \
+            "$REFERENCE")
+
+          SIZE_BYTES=$(stat -c%s "$INPUT")
+
+          AUDIO_COUNT=$(ffprobe \
+            -v error \
+            -select_streams a \
+            -show_entries stream=index \
+            -of csv=p=0 \
+            "$INPUT" \
+            | wc -l)
+
+          echo "Resolucao: ${WIDTH}x${HEIGHT}" | tee -a "$REPORT"
+          echo "Codec video: $CODEC" | tee -a "$REPORT"
+          echo "Pixel format: $PIX_FMT" | tee -a "$REPORT"
+          echo "FPS: $FPS" | tee -a "$REPORT"
+          echo "Duracao final: $DURATION s" | tee -a "$REPORT"
+          echo "Duracao referencia: $REF_DURATION s" | tee -a "$REPORT"
+          echo "Tamanho: $SIZE_BYTES bytes" | tee -a "$REPORT"
+          echo "Streams de audio: $AUDIO_COUNT" | tee -a "$REPORT"
+
+          # -----------------------------------------------------
+          # HARD FAILS - VIDEO
+          # -----------------------------------------------------
+
+          if [ "$WIDTH" != "1080" ] || [ "$HEIGHT" != "1920" ]; then
+            echo "FAIL: resolucao diferente de 1080x1920." | tee -a "$REPORT"
+            exit 1
+          fi
+
+          if [ "$CODEC" != "h264" ]; then
+            echo "FAIL: codec de video inesperado ($CODEC)." | tee -a "$REPORT"
+            exit 1
+          fi
+
+          if [ "$PIX_FMT" != "yuv420p" ]; then
+            echo "FAIL: pixel format inesperado ($PIX_FMT)." | tee -a "$REPORT"
+            exit 1
+          fi
+
+          FPS_BAD=$(awk \
+            -v f="$FPS" \
+            'BEGIN {
+              if (f < 29.0 || f > 31.0) print 1;
+              else print 0
+            }')
+
+          if [ "$FPS_BAD" = "1" ]; then
+            echo "FAIL: FPS fora da faixa esperada." | tee -a "$REPORT"
+            exit 1
+          fi
+
+          DUR_DIFF=$(awk \
+            -v a="$DURATION" \
+            -v b="$REF_DURATION" \
+            'BEGIN {
+              d=a-b;
+              if (d < 0) d=-d;
+              printf "%.6f", d
+            }')
+
+          DUR_BAD=$(awk \
+            -v d="$DUR_DIFF" \
+            'BEGIN {
+              if (d > 0.12) print 1;
+              else print 0
+            }')
+
+          if [ "$DUR_BAD" = "1" ]; then
+            echo "FAIL: duracao mudou mais de 0.12s." | tee -a "$REPORT"
+            echo "Diferenca: $DUR_DIFF s" | tee -a "$REPORT"
+            exit 1
+          fi
+
+          if [ "$SIZE_BYTES" -lt 500000 ]; then
+            echo "FAIL: arquivo final pequeno demais." | tee -a "$REPORT"
+            exit 1
+          fi
+
+          # -----------------------------------------------------
+          # HARD FAIL - DECODIFICACAO
+          # -----------------------------------------------------
+
+          ffmpeg \
+            -v error \
+            -i "$INPUT" \
+            -f null - \
+            2> output/stage10/decode_errors.txt || true
+
+          if [ -s output/stage10/decode_errors.txt ]; then
+            echo "FAIL: FFmpeg encontrou erro de decodificacao." | tee -a "$REPORT"
+            cat output/stage10/decode_errors.txt | tee -a "$REPORT"
+            exit 1
+          fi
+
+          echo "Decodificacao integral: OK" | tee -a "$REPORT"
+
+          # -----------------------------------------------------
+          # AUDIO
+          # -----------------------------------------------------
+
+          if [ -f output/stage08/no_narration.flag ]; then
+            EXPECT_AUDIO=0
+          else
+            EXPECT_AUDIO=1
+          fi
+
+          if [ "$EXPECT_AUDIO" = "1" ] && [ "$AUDIO_COUNT" -lt 1 ]; then
+            echo "FAIL: narracao esperada, mas audio ausente." | tee -a "$REPORT"
+            exit 1
+          fi
+
+          if [ "$AUDIO_COUNT" -gt 0 ]; then
+
+            AUDIO_CODEC=$(ffprobe \
+              -v error \
+              -select_streams a:0 \
+              -show_entries stream=codec_name \
+              -of csv=p=0 \
+              "$INPUT")
+
+            AUDIO_DURATION=$(ffprobe \
+              -v error \
+              -select_streams a:0 \
+              -show_entries stream=duration \
+              -of csv=p=0 \
+              "$INPUT")
+
+            MEAN_VOLUME=$(ffmpeg \
+              -hide_banner \
+              -i "$INPUT" \
+              -map 0:a:0 \
+              -af volumedetect \
+              -f null - 2>&1 \
+              | sed -n 's/.*mean_volume: \([-0-9.]*\) dB.*/\1/p' \
+              | tail -1)
+
+            MAX_VOLUME=$(ffmpeg \
+              -hide_banner \
+              -i "$INPUT" \
+              -map 0:a:0 \
+              -af volumedetect \
+              -f null - 2>&1 \
+              | sed -n 's/.*max_volume: \([-0-9.]*\) dB.*/\1/p' \
+              | tail -1)
+
+            echo "Codec audio: $AUDIO_CODEC" | tee -a "$REPORT"
+            echo "Duracao audio: ${AUDIO_DURATION:-indisponivel} s" | tee -a "$REPORT"
+            echo "Volume medio: ${MEAN_VOLUME:-indisponivel} dB" | tee -a "$REPORT"
+            echo "Pico de audio: ${MAX_VOLUME:-indisponivel} dB" | tee -a "$REPORT"
+
+            if [ -n "$MEAN_VOLUME" ]; then
+              TOO_QUIET=$(awk \
+                -v v="$MEAN_VOLUME" \
+                'BEGIN {
+                  if (v < -38.0) print 1;
+                  else print 0
+                }')
+
+              if [ "$TOO_QUIET" = "1" ]; then
+                echo "FAIL: audio praticamente inaudivel." | tee -a "$REPORT"
+                exit 1
+              fi
+            fi
+
+          fi
+
+          # -----------------------------------------------------
+          # DIAGNOSTICOS - NAO BLOQUEIAM O MASTER
+          # -----------------------------------------------------
+
+          echo "" | tee -a "$REPORT"
+          echo "DIAGNOSTICOS VISUAIS" | tee -a "$REPORT"
+          echo "----------------------------------------" | tee -a "$REPORT"
+
+          ffmpeg \
+            -hide_banner \
+            -i "$INPUT" \
+            -vf "freezedetect=n=-55dB:d=2.5" \
+            -an \
+            -f null - \
+            2> output/stage10/freezedetect_raw.txt || true
+
+          grep -E "freeze_(start|duration|end)" \
+            output/stage10/freezedetect_raw.txt \
+            > output/stage10/freezes.txt || true
+
+          FREEZE_COUNT=$(grep -c "freeze_start" \
+            output/stage10/freezes.txt || true)
+
+          echo "Eventos de freeze >=2.5s: $FREEZE_COUNT" | tee -a "$REPORT"
+
+          ffmpeg \
+            -hide_banner \
+            -i "$INPUT" \
+            -vf "blackdetect=d=1.0:pix_th=0.10" \
+            -an \
+            -f null - \
+            2> output/stage10/blackdetect_raw.txt || true
+
+          grep "black_start" \
+            output/stage10/blackdetect_raw.txt \
+            > output/stage10/black_frames.txt || true
+
+          BLACK_COUNT=$(wc -l < output/stage10/black_frames.txt)
+
+          echo "Trechos pretos >=1s: $BLACK_COUNT" | tee -a "$REPORT"
+
+          if [ "$AUDIO_COUNT" -gt 0 ]; then
+
+            ffmpeg \
+              -hide_banner \
+              -i "$INPUT" \
+              -map 0:a:0 \
+              -af "silencedetect=noise=-45dB:d=2.0" \
+              -f null - \
+              2> output/stage10/silencedetect_raw.txt || true
+
+            grep -E "silence_(start|end|duration)" \
+              output/stage10/silencedetect_raw.txt \
+              > output/stage10/silences.txt || true
+
+            SILENCE_COUNT=$(grep -c "silence_start" \
+              output/stage10/silences.txt || true)
+
+            echo "Silencios >=2s: $SILENCE_COUNT" | tee -a "$REPORT"
+
+          else
+            : > output/stage10/silences.txt
+            echo "Silencios: N/A (video sem audio)" | tee -a "$REPORT"
+          fi
+
+          # -----------------------------------------------------
+          # FRAME COUNT
+          # -----------------------------------------------------
+
+          FRAME_COUNT=$(ffprobe \
+            -v error \
+            -count_frames \
+            -select_streams v:0 \
+            -show_entries stream=nb_read_frames \
+            -of default=noprint_wrappers=1:nokey=1 \
+            "$INPUT")
+
+          EXPECTED_FRAMES=$(awk \
+            -v d="$DURATION" \
+            -v f="$FPS" \
+            'BEGIN {
+              printf "%.0f", d*f
+            }')
+
+          echo "Frames lidos: $FRAME_COUNT" | tee -a "$REPORT"
+          echo "Frames esperados aprox.: $EXPECTED_FRAMES" | tee -a "$REPORT"
+
+          # -----------------------------------------------------
+          # APROVACAO FINAL
+          # -----------------------------------------------------
+
+          cp "$INPUT" output/stage10/final_master.mp4
+
+          test -s output/stage10/final_master.mp4
+
+          echo "" | tee -a "$REPORT"
+          echo "========================================" | tee -a "$REPORT"
+          echo "RESULTADO: APROVADO" | tee -a "$REPORT"
+          echo "Master final: output/stage10/final_master.mp4" | tee -a "$REPORT"
+          echo "========================================" | tee -a "$REPORT"
+
+      - name: Stage 10 - Criar Relatorio JSON
+        shell: bash
+        run: |
+          set -e
+
+          python3 - <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+
+          video = Path(
+              "output/stage10/final_master.mp4"
+          )
+
+          def probe(args):
+              return subprocess.check_output(
+                  args,
+                  text=True
+              ).strip()
+
+          duration = float(
+              probe([
+                  "ffprobe",
+                  "-v", "error",
+                  "-show_entries", "format=duration",
+                  "-of", "default=noprint_wrappers=1:nokey=1",
+                  str(video)
+              ])
+          )
+
+          width = int(
+              probe([
+                  "ffprobe",
+                  "-v", "error",
+                  "-select_streams", "v:0",
+                  "-show_entries", "stream=width",
+                  "-of", "csv=p=0",
+                  str(video)
+              ])
+          )
+
+          height = int(
+              probe([
+                  "ffprobe",
+                  "-v", "error",
+                  "-select_streams", "v:0",
+                  "-show_entries", "stream=height",
+                  "-of", "csv=p=0",
+                  str(video)
+              ])
+          )
+
+          freezes = Path(
+              "output/stage10/freezes.txt"
+          ).read_text(
+              encoding="utf-8",
+              errors="ignore"
+          ).splitlines()
+
+          blacks = Path(
+              "output/stage10/black_frames.txt"
+          ).read_text(
+              encoding="utf-8",
+              errors="ignore"
+          ).splitlines()
+
+          silences = Path(
+              "output/stage10/silences.txt"
+          ).read_text(
+              encoding="utf-8",
+              errors="ignore"
+          ).splitlines()
+
+          report = {
+              "status": "APROVADO",
+              "master": "final_master.mp4",
+              "resolution": {
+                  "width": width,
+                  "height": height
+              },
+              "duration_seconds": round(duration, 3),
+              "freeze_events_raw": freezes,
+              "black_events_raw": blacks,
+              "silence_events_raw": silences,
+              "music": False,
+              "visual_polish": True,
+              "narration_preserved": True
+          }
+
+          Path(
+              "output/stage10/qa_report.json"
+          ).write_text(
+              json.dumps(
+                  report,
+                  ensure_ascii=False,
+                  indent=2
+              ),
+              encoding="utf-8"
+          )
+          PY
+
+          test -s output/stage10/qa_report.json
+
+      - name: Disponibilizar Stage 10 QA e Master Final
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-10-final-master-qa
+          path: |
+            output/stage10/final_master.mp4
+            output/stage10/qa_report.txt
+            output/stage10/qa_report.json
+            output/stage10/decode_errors.txt
+            output/stage10/freezes.txt
+            output/stage10/black_frames.txt
+            output/stage10/silences.txt
+          retention-days: 7
+          if-no-files-found: error
+
+      # =========================================================
       # VALIDAR V15
       # =========================================================
 
@@ -2661,6 +3147,7 @@ jobs:
 
           test -s output/stage08/final_ai_director.mp4
           test -s output/stage09/final_visual_polish.mp4
+          test -s output/stage10/final_master.mp4
           test -s output/stage06_ai/director_plan.json
 
           WIDTH=$(ffprobe \
@@ -2668,14 +3155,14 @@ jobs:
             -select_streams v:0 \
             -show_entries stream=width \
             -of csv=p=0 \
-            output/stage09/final_visual_polish.mp4)
+            output/stage10/final_master.mp4)
 
           HEIGHT=$(ffprobe \
             -v error \
             -select_streams v:0 \
             -show_entries stream=height \
             -of csv=p=0 \
-            output/stage09/final_visual_polish.mp4)
+            output/stage10/final_master.mp4)
 
           if [ "$WIDTH" != "1080" ] || [ "$HEIGHT" != "1920" ]; then
             echo "ERRO: final fora de 1080x1920."
@@ -2683,7 +3170,7 @@ jobs:
           fi
 
           echo "========================================"
-          echo "V15.18 ACABAMENTO VISUAL VALIDADO"
+          echo "V15.19 QA TECNICO AUTOMATICO VALIDADO"
           echo "Vision: OK"
           echo "Prompt opcional: OK"
           echo "Video sem narracao: suportado"
@@ -2693,6 +3180,7 @@ jobs:
           echo "Legenda original preservada como ancora semantica: suportado"
           echo "Trilha sonora: DESATIVADA"
           echo "Acabamento visual conservador: suportado"
+          echo "QA tecnico automatico: suportado"
           echo "Freeze final: removido"
           echo "========================================"
 
@@ -2765,6 +3253,9 @@ jobs:
             output/stage08/narration_master.m4a
             output/stage08/final_ai_director.mp4
             output/stage09/final_visual_polish.mp4
+            output/stage10/final_master.mp4
+            output/stage10/qa_report.txt
+            output/stage10/qa_report.json
             output/stage06_ai/director_plan.json
             output/stage06_ai/provider.txt
           retention-days: 7
