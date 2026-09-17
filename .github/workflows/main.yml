@@ -1,4 +1,4 @@
-name: Parece Mentira - Video Engine V3
+name: Parece Mentira - Video Engine V3.1
 
 on:
   workflow_dispatch:
@@ -84,11 +84,6 @@ jobs:
 
           echo "DURATION=$DURATION" >> "$GITHUB_ENV"
 
-          echo "========================================"
-          echo "SOURCE ANALYSIS"
-          echo "Duracao: $DURATION segundos"
-          echo "========================================"
-
           ffprobe \
             -v error \
             -show_entries format=duration,size,bit_rate \
@@ -97,25 +92,29 @@ jobs:
             "$VIDEO" \
             > output/source_report.txt
 
+          echo "========================================"
+          echo "SOURCE ANALYSIS"
+          echo "Duracao: $DURATION segundos"
+          echo "========================================"
+
           cat output/source_report.txt
 
       # =========================================================
       # STAGE 01
-      # SOURCE CLEANING / BRANDING
+      # BRANDING
       #
-      # Timeline original permanece intacta.
+      # IMPORTANTE:
+      # - timeline original preservada
+      # - sem cortes
+      # - sem reordenacao
       #
-      # Ciclo Instagram observado:
+      # A logo foi achatada para 190x130.
       #
-      # 00-08  superior
-      # 08-09  transicao
-      # 09-17  inferior
-      # 17-18  transicao
+      # O movimento ocorre em blocos independentes.
+      # Cada bloco da logo recebe fade IN e OUT.
       #
-      # repete a cada 18 segundos.
-      #
-      # Durante a transicao existe sobreposicao das duas logos
-      # para impedir que a marca original fique descoberta.
+      # Isso evita depender de expressoes dinamicas
+      # de alpha incompatíveis com colorchannelmixer.
       # =========================================================
 
       - name: Stage 01 - Branding Animado
@@ -125,9 +124,9 @@ jobs:
 
           echo "========================================"
           echo "STAGE 01 - BRANDING ANIMADO"
+          echo "Logo: 190x130"
+          echo "Fade progressivo"
           echo "Timeline original preservada"
-          echo "Logo 180x135"
-          echo "Transicao cruzada de 1 segundo"
           echo "========================================"
 
           ffmpeg -y \
@@ -141,39 +140,95 @@ jobs:
             [base];\
             \
             [1:v]\
-            scale=180:135,\
+            scale=190:130,\
             format=rgba,\
-            split=2\
-            [topraw][bottomraw];\
+            split=10\
+            [l0][l1][l2][l3][l4][l5][l6][l7][l8][l9];\
             \
-            [topraw]\
-            colorchannelmixer=aa='\
-            if(lt(mod(t,18),8),1,\
-            if(lt(mod(t,18),9),9-mod(t,18),\
-            if(lt(mod(t,18),17),0,\
-            if(lt(mod(t,18),18),mod(t,18)-17,1))))'\
-            [top];\
+            [l0]fade=t=out:st=7.6:d=1.4:alpha=1[top0];\
             \
-            [bottomraw]\
-            colorchannelmixer=aa='\
-            if(lt(mod(t,18),8),0,\
-            if(lt(mod(t,18),9),mod(t,18)-8,\
-            if(lt(mod(t,18),17),1,\
-            if(lt(mod(t,18),18),18-mod(t,18),0))))'\
-            [bottom];\
+            [l1]\
+            fade=t=in:st=7.6:d=1.4:alpha=1,\
+            fade=t=out:st=16.6:d=1.4:alpha=1\
+            [bottom0];\
             \
-            [base][top]\
-            overlay=\
-            x=W-w-55:\
-            y=420:\
-            eof_action=repeat\
+            [l2]\
+            fade=t=in:st=16.6:d=1.4:alpha=1,\
+            fade=t=out:st=25.6:d=1.4:alpha=1\
+            [top1];\
+            \
+            [l3]\
+            fade=t=in:st=25.6:d=1.4:alpha=1,\
+            fade=t=out:st=34.6:d=1.4:alpha=1\
+            [bottom1];\
+            \
+            [l4]\
+            fade=t=in:st=34.6:d=1.4:alpha=1,\
+            fade=t=out:st=43.6:d=1.4:alpha=1\
+            [top2];\
+            \
+            [l5]\
+            fade=t=in:st=43.6:d=1.4:alpha=1,\
+            fade=t=out:st=52.6:d=1.4:alpha=1\
+            [bottom2];\
+            \
+            [l6]\
+            fade=t=in:st=52.6:d=1.4:alpha=1,\
+            fade=t=out:st=61.6:d=1.4:alpha=1\
+            [top3];\
+            \
+            [l7]\
+            fade=t=in:st=61.6:d=1.4:alpha=1,\
+            fade=t=out:st=70.6:d=1.4:alpha=1\
+            [bottom3];\
+            \
+            [l8]\
+            fade=t=in:st=70.6:d=1.4:alpha=1,\
+            fade=t=out:st=79.6:d=1.4:alpha=1\
+            [top4];\
+            \
+            [l9]\
+            fade=t=in:st=79.6:d=1.4:alpha=1\
+            [bottom4];\
+            \
+            [base][top0]\
+            overlay=x=W-w-45:y=415:enable='between(t,0,9)'\
             [v1];\
             \
-            [v1][bottom]\
-            overlay=\
-            x=105:\
-            y=H-h-610:\
-            eof_action=repeat\
+            [v1][bottom0]\
+            overlay=x=95:y=H-h-605:enable='between(t,7.6,18)'\
+            [v2];\
+            \
+            [v2][top1]\
+            overlay=x=W-w-45:y=415:enable='between(t,16.6,27)'\
+            [v3];\
+            \
+            [v3][bottom1]\
+            overlay=x=95:y=H-h-605:enable='between(t,25.6,36)'\
+            [v4];\
+            \
+            [v4][top2]\
+            overlay=x=W-w-45:y=415:enable='between(t,34.6,45)'\
+            [v5];\
+            \
+            [v5][bottom2]\
+            overlay=x=95:y=H-h-605:enable='between(t,43.6,54)'\
+            [v6];\
+            \
+            [v6][top3]\
+            overlay=x=W-w-45:y=415:enable='between(t,52.6,63)'\
+            [v7];\
+            \
+            [v7][bottom3]\
+            overlay=x=95:y=H-h-605:enable='between(t,61.6,72)'\
+            [v8];\
+            \
+            [v8][top4]\
+            overlay=x=W-w-45:y=415:enable='between(t,70.6,81)'\
+            [v9];\
+            \
+            [v9][bottom4]\
+            overlay=x=95:y=H-h-605:enable='gte(t,79.6)'\
             [clean]" \
             -map "[clean]" \
             -map 0:a? \
@@ -231,9 +286,6 @@ jobs:
       # =========================================================
       # STAGE 02
       # EDITORIAL MASTER
-      #
-      # A partir daqui podemos modificar a timeline.
-      # Audio original removido.
       # =========================================================
 
       - name: Stage 02 - Criar Editorial Master
@@ -243,7 +295,7 @@ jobs:
 
           echo "========================================"
           echo "STAGE 02 - EDITORIAL MASTER"
-          echo "Audio original sera removido"
+          echo "Removendo audio original"
           echo "========================================"
 
           ffmpeg -y \
@@ -299,12 +351,12 @@ jobs:
             | wc -l)
 
           if [ "$WIDTH" != "1080" ] || [ "$HEIGHT" != "1920" ]; then
-            echo "ERRO: Editorial Master fora de 1080x1920."
+            echo "ERRO: resolucao Stage 02 incorreta."
             exit 1
           fi
 
           if [ "$AUDIO_COUNT" -ne 0 ]; then
-            echo "ERRO: audio original ainda presente."
+            echo "ERRO: Stage 02 ainda possui audio."
             exit 1
           fi
 
@@ -312,14 +364,7 @@ jobs:
 
       # =========================================================
       # STAGE 03
-      # SCENE DETECTION
-      #
-      # Analisa mudancas visuais significativas.
-      #
-      # Ainda NAO corta o video.
-      # Ainda NAO reordena cenas.
-      #
-      # Apenas cria o mapa editorial.
+      # DETECCAO DE CENAS
       # =========================================================
 
       - name: Stage 03 - Detectar Cenas
@@ -329,7 +374,6 @@ jobs:
 
           echo "========================================"
           echo "STAGE 03 - SCENE DETECTION"
-          echo "Analisando mudancas visuais..."
           echo "========================================"
 
           ffmpeg \
@@ -362,23 +406,14 @@ jobs:
             output/scene_report_unique.txt \
             output/scene_report.txt
 
-          SCENE_COUNT=$(wc -l < output/scene_report.txt)
-
           echo "========================================"
-          echo "PONTOS EDITORIAIS DETECTADOS"
+          echo "PONTOS DETECTADOS"
           echo "========================================"
 
           cat output/scene_report.txt
 
-          echo "========================================"
-          echo "Total de pontos: $SCENE_COUNT"
-          echo "========================================"
-
       # =========================================================
-      # STAGE 03 - GERAR PREVIEWS
-      #
-      # Cria uma imagem de cada ponto detectado.
-      # Isso vai permitir validar visualmente as cenas.
+      # PREVIEWS DAS CENAS
       # =========================================================
 
       - name: Stage 03 - Gerar Previews
@@ -411,15 +446,11 @@ jobs:
 
           done < output/scene_report.txt
 
-          echo "Previews gerados:"
-
-          find output/scenes \
-            -type f \
-            -iname "*.jpg" \
-            | sort
+          echo "Previews:"
+          find output/scenes -type f -iname "*.jpg" | sort
 
       # =========================================================
-      # PACOTES
+      # ARTIFACTS
       # =========================================================
 
       - name: Disponibilizar Stage 01
