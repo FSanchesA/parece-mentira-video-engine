@@ -1,4 +1,4 @@
-name: Parece Mentira - Video Engine V7
+name: Parece Mentira - Video Engine V8
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ concurrency:
 jobs:
   render-video:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 20
 
     steps:
 
@@ -109,6 +109,7 @@ jobs:
 
       # =========================================================
       # STAGE 01 - SOURCE BRANDING
+      # CONGELADO / APROVADO
       # =========================================================
 
       - name: Stage 01 - Branding Ajustado Final
@@ -288,6 +289,10 @@ jobs:
         run: |
           set -e
 
+          echo "========================================"
+          echo "STAGE 03 - DETECCAO DE CENAS"
+          echo "========================================"
+
           ffmpeg \
             -hide_banner \
             -i output/editorial_master.mp4 \
@@ -318,8 +323,11 @@ jobs:
             output/scene_report_unique.txt \
             output/scene_report.txt
 
+          echo "Pontos detectados:"
+          cat output/scene_report.txt
+
       # =========================================================
-      # STAGE 03 - GERAR PREVIEWS
+      # STAGE 03 - PREVIEWS
       # =========================================================
 
       - name: Stage 03 - Gerar Previews
@@ -353,6 +361,147 @@ jobs:
           done < output/scene_report.txt
 
       # =========================================================
+      # STAGE 04 - SCENE CUTTER
+      #
+      # Corta o editorial_master nos pontos detectados
+      # pelo Stage 03.
+      #
+      # Ainda NAO reordena.
+      # Ainda NAO exclui cenas.
+      # =========================================================
+
+      - name: Stage 04 - Criar Clips de Cena
+        shell: bash
+        run: |
+          set -e
+
+          echo "========================================"
+          echo "STAGE 04 - SCENE CUTTER"
+          echo "Separando o video em cenas..."
+          echo "========================================"
+
+          mkdir -p output/stage04_clips
+
+          mapfile -t TIMES < output/scene_report.txt
+
+          TOTAL_POINTS=${#TIMES[@]}
+
+          if [ "$TOTAL_POINTS" -lt 2 ]; then
+            echo "ERRO: pontos insuficientes para cortar cenas."
+            exit 1
+          fi
+
+          echo "scene,start,end,duration,file" > output/edit_plan.csv
+          echo "PARECE MENTIRA - EDIT PLAN" > output/edit_plan.txt
+          echo "========================================" >> output/edit_plan.txt
+
+          CREATED=0
+
+          for ((i=0; i<TOTAL_POINTS-1; i++)); do
+
+            START="${TIMES[$i]}"
+            END="${TIMES[$((i+1))]}"
+
+            CLIP_DURATION=$(awk \
+              -v start="$START" \
+              -v end="$END" \
+              'BEGIN { printf "%.6f", end-start }')
+
+            VALID=$(awk \
+              -v d="$CLIP_DURATION" \
+              'BEGIN { if (d > 0.01) print 1; else print 0 }')
+
+            if [ "$VALID" != "1" ]; then
+              echo "Ignorando trecho invalido: $START -> $END"
+              continue
+            fi
+
+            CREATED=$((CREATED + 1))
+
+            printf -v NUMBER "%03d" "$CREATED"
+
+            OUTPUT_FILE="output/stage04_clips/scene_${NUMBER}.mp4"
+
+            echo "----------------------------------------"
+            echo "Cena $NUMBER"
+            echo "Inicio: $START"
+            echo "Fim: $END"
+            echo "Duracao: $CLIP_DURATION"
+            echo "----------------------------------------"
+
+            ffmpeg -y \
+              -ss "$START" \
+              -i output/editorial_master.mp4 \
+              -t "$CLIP_DURATION" \
+              -map 0:v:0 \
+              -an \
+              -c:v libx264 \
+              -preset veryfast \
+              -crf 20 \
+              -pix_fmt yuv420p \
+              -movflags +faststart \
+              "$OUTPUT_FILE"
+
+            echo "${NUMBER},${START},${END},${CLIP_DURATION},scene_${NUMBER}.mp4" \
+              >> output/edit_plan.csv
+
+            {
+              echo ""
+              echo "CENA $NUMBER"
+              echo "Inicio: $START s"
+              echo "Fim: $END s"
+              echo "Duracao: $CLIP_DURATION s"
+              echo "Arquivo: scene_${NUMBER}.mp4"
+            } >> output/edit_plan.txt
+
+          done
+
+          echo ""
+          echo "========================================"
+          echo "STAGE 04 CONCLUIDO"
+          echo "Cenas criadas: $CREATED"
+          echo "========================================"
+
+          if [ "$CREATED" -lt 1 ]; then
+            echo "ERRO: nenhuma cena foi criada."
+            exit 1
+          fi
+
+          echo ""
+          echo "EDIT PLAN:"
+          cat output/edit_plan.csv
+
+      # =========================================================
+      # VALIDAR STAGE 04
+      # =========================================================
+
+      - name: Validar Stage 04
+        shell: bash
+        run: |
+          set -e
+
+          CLIP_COUNT=$(find output/stage04_clips \
+            -type f \
+            -name "scene_*.mp4" \
+            | wc -l)
+
+          echo "Clips encontrados: $CLIP_COUNT"
+
+          if [ "$CLIP_COUNT" -lt 1 ]; then
+            echo "ERRO: Stage 04 nao gerou clips."
+            exit 1
+          fi
+
+          test -s output/edit_plan.csv
+          test -s output/edit_plan.txt
+
+          echo "========================================"
+          echo "STAGE 04 VALIDADO"
+          echo "Clips: $CLIP_COUNT"
+          echo "Edit plan: OK"
+          echo "========================================"
+
+      # =========================================================
       # ARTIFACTS
       # =========================================================
 
@@ -384,5 +533,16 @@ jobs:
             output/scene_times.txt
             output/scene_detection_raw.txt
             output/scenes/*.jpg
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Disponibilizar Stage 04
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-04-scene-clips
+          path: |
+            output/stage04_clips/*.mp4
+            output/edit_plan.csv
+            output/edit_plan.txt
           retention-days: 7
           if-no-files-found: error
