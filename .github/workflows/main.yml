@@ -1,4 +1,5 @@
-name: Parece Mentira - Video Engine V15.19 QA Tecnico Automatico
+name: Parece Mentira - Video Engine V15.20 App Backend
+run-name: ${{ inputs.app_job_tag != '' && format('APP {0}', inputs.app_job_tag) || 'Execucao manual' }}
 on:
   workflow_dispatch:
     inputs:
@@ -26,6 +27,30 @@ on:
           - NOVA
           - SEM_NARRACAO
           - PLANO_MANUAL
+      app_job_tag:
+        description: "Tag do job criado pelo app"
+        required: false
+        type: string
+        default: ""
+      app_release_id:
+        description: "Release ID do job criado pelo app"
+        required: false
+        type: string
+        default: ""
+      app_source_asset_id:
+        description: "Asset ID do video enviado pelo app"
+        required: false
+        type: string
+        default: ""
+      app_source_filename:
+        description: "Nome do video enviado pelo app"
+        required: false
+        type: string
+        default: ""
+permissions:
+  contents: write
+  actions: read
+
 concurrency:
   group: parece-mentira-video-engine
   cancel-in-progress: true
@@ -49,6 +74,45 @@ jobs:
           sudo apt-get install -y ffmpeg python3-pip
 
       # =========================================================
+      # APP - BAIXAR VIDEO TEMPORARIO DA RELEASE
+      # =========================================================
+
+      - name: App - Baixar video enviado
+        if: ${{ inputs.app_source_asset_id != '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_ASSET_ID: ${{ inputs.app_source_asset_id }}
+          SOURCE_FILENAME: ${{ inputs.app_source_filename }}
+        run: |
+          set -e
+
+          mkdir -p app_input
+
+          SAFE_NAME=$(printf "%s" "${SOURCE_FILENAME:-video.mp4}" \
+            | sed 's/[^A-Za-z0-9._-]/_/g')
+
+          if [ -z "$SAFE_NAME" ]; then
+            SAFE_NAME="video.mp4"
+          fi
+
+          curl -L \
+            --fail \
+            --retry 3 \
+            --retry-delay 2 \
+            -H "Accept: application/octet-stream" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/assets/${SOURCE_ASSET_ID}" \
+            -o "app_input/$SAFE_NAME"
+
+          test -s "app_input/$SAFE_NAME"
+
+          echo "APP_VIDEO=app_input/$SAFE_NAME" >> "$GITHUB_ENV"
+
+          echo "VIDEO DO APP BAIXADO: app_input/$SAFE_NAME"
+
+      # =========================================================
       # LOCALIZAR ARQUIVOS
       # =========================================================
 
@@ -57,12 +121,17 @@ jobs:
         run: |
           set -e
 
-          VIDEO=$(find . \
-            -maxdepth 2 \
-            -type f \
-            -iname "*.mp4" \
-            ! -path "./output/*" \
-            | head -1)
+          if [ -n "${APP_VIDEO:-}" ] && [ -s "$APP_VIDEO" ]; then
+            VIDEO="$APP_VIDEO"
+          else
+            VIDEO=$(find . \
+              -maxdepth 2 \
+              -type f \
+              -iname "*.mp4" \
+              ! -path "./output/*" \
+              ! -path "./app_input/*" \
+              | head -1)
+          fi
 
           if [ -z "$VIDEO" ]; then
             echo "ERRO: nenhum MP4 encontrado."
@@ -3137,6 +3206,53 @@ jobs:
           if-no-files-found: error
 
       # =========================================================
+      # APP - PUBLICAR RESULTADO NA RELEASE TEMPORARIA
+      # =========================================================
+
+      - name: App - Publicar master final
+        if: ${{ success() && inputs.app_job_tag != '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP_JOB_TAG: ${{ inputs.app_job_tag }}
+        run: |
+          set -e
+
+          test -s output/stage10/final_master.mp4
+          test -s output/stage10/qa_report.json
+
+          gh release upload "$APP_JOB_TAG" \
+            "output/stage10/final_master.mp4#final_master.mp4" \
+            "output/stage10/qa_report.json#qa_report.json" \
+            --repo "${{ github.repository }}" \
+            --clobber
+
+      - name: App - Publicar marcador de falha
+        if: ${{ failure() && inputs.app_job_tag != '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP_JOB_TAG: ${{ inputs.app_job_tag }}
+        run: |
+          set +e
+
+          mkdir -p output/app_status
+
+          cat > output/app_status/job_failed.json <<EOF
+          {
+            "status": "ERRO",
+            "job_tag": "${APP_JOB_TAG}",
+            "run_id": "${{ github.run_id }}",
+            "run_attempt": "${{ github.run_attempt }}"
+          }
+          EOF
+
+          gh release upload "$APP_JOB_TAG" \
+            "output/app_status/job_failed.json#job_failed.json" \
+            --repo "${{ github.repository }}" \
+            --clobber || true
+
+      # =========================================================
       # VALIDAR V15
       # =========================================================
 
@@ -3170,7 +3286,7 @@ jobs:
           fi
 
           echo "========================================"
-          echo "V15.19 QA TECNICO AUTOMATICO VALIDADO"
+          echo "V15.20 APP BACKEND VALIDADO"
           echo "Vision: OK"
           echo "Prompt opcional: OK"
           echo "Video sem narracao: suportado"
