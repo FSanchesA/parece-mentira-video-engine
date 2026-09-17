@@ -1,7 +1,11 @@
-name: Parece Mentira - Stage 01 Branding
+name: Parece Mentira - Video Engine V2
 
 on:
   workflow_dispatch:
+
+concurrency:
+  group: parece-mentira-video-engine
+  cancel-in-progress: true
 
 jobs:
   render-video:
@@ -9,6 +13,11 @@ jobs:
     timeout-minutes: 10
 
     steps:
+
+      # =========================================================
+      # SETUP
+      # =========================================================
+
       - name: Baixar repositorio
         uses: actions/checkout@v4
 
@@ -17,12 +26,21 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
+      # =========================================================
+      # LOCALIZAR ARQUIVOS
+      # =========================================================
+
       - name: Localizar arquivos
         shell: bash
         run: |
           set -e
 
-          VIDEO=$(find . -maxdepth 2 -type f -iname "*.mp4" | head -1)
+          VIDEO=$(find . \
+            -maxdepth 2 \
+            -type f \
+            -iname "*.mp4" \
+            ! -path "./output/*" \
+            | head -1)
 
           if [ -z "$VIDEO" ]; then
             echo "ERRO: nenhum MP4 encontrado."
@@ -31,20 +49,27 @@ jobs:
 
           if [ ! -f "./logo_parece_mentira.png" ]; then
             echo "ERRO: logo_parece_mentira.png nao encontrada."
-            echo "Arquivos PNG encontrados:"
-            find . -maxdepth 2 -type f -iname "*.png"
             exit 1
           fi
 
           echo "VIDEO=$VIDEO" >> "$GITHUB_ENV"
 
-          echo "Video encontrado: $VIDEO"
-          echo "Logo encontrada: ./logo_parece_mentira.png"
+          echo "========================================"
+          echo "ARQUIVOS LOCALIZADOS"
+          echo "Video: $VIDEO"
+          echo "Logo: ./logo_parece_mentira.png"
+          echo "========================================"
 
-      - name: Analisar duracao original
+      # =========================================================
+      # ANALISE DA FONTE
+      # =========================================================
+
+      - name: Analisar video original
         shell: bash
         run: |
           set -e
+
+          mkdir -p output
 
           DURATION=$(ffprobe \
             -v error \
@@ -53,59 +78,99 @@ jobs:
             "$VIDEO")
 
           if [ -z "$DURATION" ]; then
-            echo "ERRO: nao foi possivel determinar a duracao."
+            echo "ERRO: duracao nao identificada."
             exit 1
           fi
 
           echo "DURATION=$DURATION" >> "$GITHUB_ENV"
-          echo "Duracao original: $DURATION segundos"
 
-      - name: Criar Stage 01
+          echo "========================================"
+          echo "SOURCE ANALYSIS"
+          echo "Duracao: $DURATION segundos"
+          echo "========================================"
+
+          ffprobe \
+            -v error \
+            -show_entries format=duration,size,bit_rate \
+            -show_entries stream=index,codec_type,codec_name,width,height,r_frame_rate \
+            -of default=noprint_wrappers=1 \
+            "$VIDEO" \
+            > output/source_report.txt
+
+          cat output/source_report.txt
+
+      # =========================================================
+      # STAGE 01
+      # SOURCE CLEANING / BRANDING
+      #
+      # REGRA:
+      # NAO cortar
+      # NAO reordenar
+      # NAO alterar velocidade
+      #
+      # A timeline original precisa permanecer intacta.
+      # =========================================================
+
+      - name: Stage 01 - Source Branding
         shell: bash
         run: |
           set -e
-          mkdir -p output
 
           echo "========================================"
           echo "STAGE 01 - SOURCE BRANDING"
-          echo "Timeline original sera preservada."
-          echo "Duracao limite: $DURATION segundos"
+          echo "Timeline original preservada"
           echo "========================================"
 
           ffmpeg -y \
             -i "$VIDEO" \
             -i "./logo_parece_mentira.png" \
-            -filter_complex "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1[base];[1:v]scale=180:180,format=rgba[logo];[logo]split=2[lt][lb];[base][lt]overlay=x=W-w-70:y=180:eof_action=repeat:enable='lt(mod(t,18),8)'[v1];[v1][lb]overlay=x=70:y=H-h-350:eof_action=repeat:enable='between(mod(t,18),9,17)'[outv]" \
-            -map "[outv]" \
-            -an \
+            -filter_complex "\
+            [0:v]\
+            scale=1080:1920:force_original_aspect_ratio=increase,\
+            crop=1080:1920,\
+            setsar=1\
+            [base];\
+            [1:v]\
+            scale=150:150,\
+            format=rgba\
+            [logo];\
+            [logo]split=2[logo_top][logo_bottom];\
+            [base][logo_top]\
+            overlay=\
+            x=W-w-90:\
+            y=420:\
+            eof_action=repeat:\
+            enable='lt(mod(t,18),8)'\
+            [v1];\
+            [v1][logo_bottom]\
+            overlay=\
+            x=120:\
+            y=H-h-610:\
+            eof_action=repeat:\
+            enable='between(mod(t,18),9,17)'\
+            [clean]" \
+            -map "[clean]" \
+            -map 0:a? \
             -t "$DURATION" \
             -c:v libx264 \
-            -preset medium \
+            -preset veryfast \
             -crf 20 \
+            -c:a aac \
+            -b:a 128k \
             -pix_fmt yuv420p \
             -movflags +faststart \
             output/clean_master.mp4
+
+      # =========================================================
+      # VALIDACAO STAGE 01
+      # =========================================================
 
       - name: Validar Stage 01
         shell: bash
         run: |
           set -e
 
-          if [ ! -s "output/clean_master.mp4" ]; then
-            echo "ERRO: clean_master.mp4 nao foi criado."
-            exit 1
-          fi
-
-          echo "========================================"
-          echo "CLEAN MASTER"
-          echo "========================================"
-
-          ffprobe \
-            -v error \
-            -show_entries format=duration,size \
-            -show_entries stream=codec_type,codec_name,width,height \
-            -of default=noprint_wrappers=1 \
-            output/clean_master.mp4
+          test -s output/clean_master.mp4
 
           WIDTH=$(ffprobe \
             -v error \
@@ -121,31 +186,140 @@ jobs:
             -of csv=p=0 \
             output/clean_master.mp4)
 
-          FINAL_DURATION=$(ffprobe \
+          CLEAN_DURATION=$(ffprobe \
             -v error \
             -show_entries format=duration \
             -of default=noprint_wrappers=1:nokey=1 \
             output/clean_master.mp4)
 
-          echo "Resolucao final: ${WIDTH}x${HEIGHT}"
-          echo "Duracao final: $FINAL_DURATION segundos"
+          echo "Stage 01:"
+          echo "${WIDTH}x${HEIGHT}"
+          echo "$CLEAN_DURATION segundos"
 
           if [ "$WIDTH" != "1080" ] || [ "$HEIGHT" != "1920" ]; then
-            echo "ERRO: resolucao incorreta."
+            echo "ERRO: Stage 01 fora de 1080x1920."
+            exit 1
+          fi
+
+          echo "STAGE 01 VALIDADO."
+
+      # =========================================================
+      # STAGE 02
+      # EDITORIAL MASTER
+      #
+      # A partir daqui a timeline original pode ser alterada.
+      #
+      # Neste primeiro modulo:
+      # - usa somente o Clean Master
+      # - remove audio original
+      # - normaliza FPS
+      # - prepara master editorial
+      # =========================================================
+
+      - name: Stage 02 - Criar Editorial Master
+        shell: bash
+        run: |
+          set -e
+
+          echo "========================================"
+          echo "STAGE 02 - EDITORIAL MASTER"
+          echo "Fonte: clean_master.mp4"
+          echo "Audio original sera removido"
+          echo "========================================"
+
+          ffmpeg -y \
+            -i output/clean_master.mp4 \
+            -map 0:v:0 \
+            -an \
+            -vf "fps=30,format=yuv420p" \
+            -c:v libx264 \
+            -preset veryfast \
+            -crf 20 \
+            -movflags +faststart \
+            output/editorial_master.mp4
+
+      # =========================================================
+      # VALIDACAO STAGE 02
+      # =========================================================
+
+      - name: Validar Stage 02
+        shell: bash
+        run: |
+          set -e
+
+          test -s output/editorial_master.mp4
+
+          echo "========================================"
+          echo "EDITORIAL MASTER"
+          echo "========================================"
+
+          ffprobe \
+            -v error \
+            -show_entries format=duration,size,bit_rate \
+            -show_entries stream=codec_type,codec_name,width,height,r_frame_rate \
+            -of default=noprint_wrappers=1 \
+            output/editorial_master.mp4 \
+            | tee output/editorial_report.txt
+
+          WIDTH=$(ffprobe \
+            -v error \
+            -select_streams v:0 \
+            -show_entries stream=width \
+            -of csv=p=0 \
+            output/editorial_master.mp4)
+
+          HEIGHT=$(ffprobe \
+            -v error \
+            -select_streams v:0 \
+            -show_entries stream=height \
+            -of csv=p=0 \
+            output/editorial_master.mp4)
+
+          AUDIO_COUNT=$(ffprobe \
+            -v error \
+            -select_streams a \
+            -show_entries stream=index \
+            -of csv=p=0 \
+            output/editorial_master.mp4 \
+            | wc -l)
+
+          if [ "$WIDTH" != "1080" ] || [ "$HEIGHT" != "1920" ]; then
+            echo "ERRO: Editorial Master fora de 1080x1920."
+            exit 1
+          fi
+
+          if [ "$AUDIO_COUNT" -ne 0 ]; then
+            echo "ERRO: audio original ainda presente."
             exit 1
           fi
 
           echo "========================================"
-          echo "STAGE 01 CONCLUIDO"
-          echo "Timeline original preservada."
-          echo "Branding aplicado antes dos cortes."
-          echo "Clean Master liberado para Stage 02."
+          echo "STAGE 02 CONCLUIDO"
+          echo "1080x1920: OK"
+          echo "30 FPS: configurado"
+          echo "Audio original: removido"
+          echo "Editorial Master pronto"
           echo "========================================"
 
-      - name: Disponibilizar Clean Master
+      # =========================================================
+      # PACOTE DE SAIDA
+      # =========================================================
+
+      - name: Disponibilizar Stage 01
         uses: actions/upload-artifact@v4
         with:
-          name: parece-mentira-clean-master
+          name: stage-01-clean-master
           path: output/clean_master.mp4
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Disponibilizar Stage 02
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-02-editorial-master
+          path: |
+            output/editorial_master.mp4
+            output/source_report.txt
+            output/editorial_report.txt
           retention-days: 7
           if-no-files-found: error
