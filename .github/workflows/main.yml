@@ -1,4 +1,4 @@
-name: Parece Mentira - Video Engine V3.2
+name: Parece Mentira - Video Engine V4
 
 on:
   workflow_dispatch:
@@ -61,7 +61,7 @@ jobs:
           echo "========================================"
 
       # =========================================================
-      # ANALISE DA FONTE
+      # ANALISE DO VIDEO
       # =========================================================
 
       - name: Analisar video original
@@ -97,149 +97,64 @@ jobs:
             > output/source_report.txt
 
           echo "Duracao: $DURATION"
-          echo "Assinatura final inicia: $FINAL_START"
+          echo "Assinatura final inicia em: $FINAL_START"
 
       # =========================================================
-      # STAGE 01
-      # BRANDING EDITORIAL
+      # STAGE 01 - SOURCE BRANDING
       #
-      # Fonte permanece com timeline intacta.
-      #
-      # Ciclo:
-      # SUPERIOR -> evapora -> pausa -> INFERIOR
-      # INFERIOR -> evapora -> pausa -> SUPERIOR
-      #
-      # Evita mostrar as duas logos simultaneamente.
+      # REGRA:
+      # - timeline preservada
+      # - topo desaparece mais devagar
+      # - baixo precisa estar 100% visivel no 9s
+      # - logo mais larga para cobrir melhor
       # =========================================================
 
-      - name: Stage 01 - Branding Editorial
+      - name: Stage 01 - Branding Ajustado
         shell: bash
         run: |
           set -e
 
           echo "========================================"
-          echo "STAGE 01 - BRANDING EDITORIAL"
-          echo "Selo: 205x125"
-          echo "Transicao: evaporar -> pausa -> nascer"
-          echo "Final: logo central grande"
+          echo "STAGE 01 - BRANDING AJUSTADO"
+          echo "Timeline original preservada"
+          echo "Logo menor altura / maior largura"
+          echo "Topo some devagar"
+          echo "Baixo ja entra 100% no 9s"
           echo "========================================"
 
           ffmpeg -y \
             -i "$VIDEO" \
             -loop 1 -framerate 30 -i "./logo_parece_mentira.png" \
+            -loop 1 -framerate 30 -i "./logo_parece_mentira.png" \
             -filter_complex "\
-            [0:v]\
-            scale=1080:1920:force_original_aspect_ratio=increase,\
-            crop=1080:1920,\
-            setsar=1\
-            [base];\
+            [0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1[base];\
             \
-            [1:v]\
-            scale=205:125,\
-            format=rgba,\
-            split=10\
-            [a0][a1][a2][a3][a4][a5][a6][a7][a8][a9];\
+            [1:v]scale=240:118,format=rgba,split=10[l1][l2][l3][l4][l5][l6][l7][l8][l9][l10];\
             \
-            [a0]\
-            fade=t=out:st=7.6:d=1.1:alpha=1\
-            [top0];\
+            [l1]fade=t=out:st=8.95:d=0.55:alpha=1[top0];\
+            [l2]fade=t=in:st=8.60:d=0.40:alpha=1,fade=t=out:st=17.95:d=0.55:alpha=1[bottom0];\
+            [l3]fade=t=in:st=17.60:d=0.40:alpha=1,fade=t=out:st=26.95:d=0.55:alpha=1[top1];\
+            [l4]fade=t=in:st=26.60:d=0.40:alpha=1,fade=t=out:st=35.95:d=0.55:alpha=1[bottom1];\
+            [l5]fade=t=in:st=35.60:d=0.40:alpha=1,fade=t=out:st=44.95:d=0.55:alpha=1[top2];\
+            [l6]fade=t=in:st=44.60:d=0.40:alpha=1,fade=t=out:st=53.95:d=0.55:alpha=1[bottom2];\
+            [l7]fade=t=in:st=53.60:d=0.40:alpha=1,fade=t=out:st=62.95:d=0.55:alpha=1[top3];\
+            [l8]fade=t=in:st=62.60:d=0.40:alpha=1,fade=t=out:st=71.95:d=0.55:alpha=1[bottom3];\
+            [l9]fade=t=in:st=71.60:d=0.40:alpha=1,fade=t=out:st=80.95:d=0.55:alpha=1[top4];\
+            [l10]fade=t=in:st=80.60:d=0.40:alpha=1[bottom4];\
             \
-            [a1]\
-            fade=t=in:st=9.0:d=0.6:alpha=1,\
-            fade=t=out:st=16.6:d=1.1:alpha=1\
-            [bottom0];\
+            [base][top0]overlay=x=W-w-5:y=390:enable='between(t,0,9.5)'[v1];\
+            [v1][bottom0]overlay=x=20:y=H-h-605:enable='between(t,8.6,18.5)'[v2];\
+            [v2][top1]overlay=x=W-w-5:y=390:enable='between(t,17.6,27.5)'[v3];\
+            [v3][bottom1]overlay=x=20:y=H-h-605:enable='between(t,26.6,36.5)'[v4];\
+            [v4][top2]overlay=x=W-w-5:y=390:enable='between(t,35.6,45.5)'[v5];\
+            [v5][bottom2]overlay=x=20:y=H-h-605:enable='between(t,44.6,54.5)'[v6];\
+            [v6][top3]overlay=x=W-w-5:y=390:enable='between(t,53.6,63.5)'[v7];\
+            [v7][bottom3]overlay=x=20:y=H-h-605:enable='between(t,62.6,72.5)'[v8];\
+            [v8][top4]overlay=x=W-w-5:y=390:enable='between(t,71.6,81.5)'[v9];\
+            [v9][bottom4]overlay=x=20:y=H-h-605:enable='gte(t,80.6)'[corner_branding];\
             \
-            [a2]\
-            fade=t=in:st=18.0:d=0.6:alpha=1,\
-            fade=t=out:st=25.6:d=1.1:alpha=1\
-            [top1];\
-            \
-            [a3]\
-            fade=t=in:st=27.0:d=0.6:alpha=1,\
-            fade=t=out:st=34.6:d=1.1:alpha=1\
-            [bottom1];\
-            \
-            [a4]\
-            fade=t=in:st=36.0:d=0.6:alpha=1,\
-            fade=t=out:st=43.6:d=1.1:alpha=1\
-            [top2];\
-            \
-            [a5]\
-            fade=t=in:st=45.0:d=0.6:alpha=1,\
-            fade=t=out:st=52.6:d=1.1:alpha=1\
-            [bottom2];\
-            \
-            [a6]\
-            fade=t=in:st=54.0:d=0.6:alpha=1,\
-            fade=t=out:st=61.6:d=1.1:alpha=1\
-            [top3];\
-            \
-            [a7]\
-            fade=t=in:st=63.0:d=0.6:alpha=1,\
-            fade=t=out:st=70.6:d=1.1:alpha=1\
-            [bottom3];\
-            \
-            [a8]\
-            fade=t=in:st=72.0:d=0.6:alpha=1,\
-            fade=t=out:st=79.6:d=1.1:alpha=1\
-            [top4];\
-            \
-            [a9]\
-            fade=t=in:st=81.0:d=0.6:alpha=1\
-            [bottom4];\
-            \
-            [base][top0]\
-            overlay=x=W-w-35:y=415:enable='between(t,0,8.7)'\
-            [v1];\
-            \
-            [v1][bottom0]\
-            overlay=x=75:y=H-h-600:enable='between(t,9,17.7)'\
-            [v2];\
-            \
-            [v2][top1]\
-            overlay=x=W-w-35:y=415:enable='between(t,18,26.7)'\
-            [v3];\
-            \
-            [v3][bottom1]\
-            overlay=x=75:y=H-h-600:enable='between(t,27,35.7)'\
-            [v4];\
-            \
-            [v4][top2]\
-            overlay=x=W-w-35:y=415:enable='between(t,36,44.7)'\
-            [v5];\
-            \
-            [v5][bottom2]\
-            overlay=x=75:y=H-h-600:enable='between(t,45,53.7)'\
-            [v6];\
-            \
-            [v6][top3]\
-            overlay=x=W-w-35:y=415:enable='between(t,54,62.7)'\
-            [v7];\
-            \
-            [v7][bottom3]\
-            overlay=x=75:y=H-h-600:enable='between(t,63,71.7)'\
-            [v8];\
-            \
-            [v8][top4]\
-            overlay=x=W-w-35:y=415:enable='between(t,72,80.7)'\
-            [v9];\
-            \
-            [v9][bottom4]\
-            overlay=x=75:y=H-h-600:enable='gte(t,81)'\
-            [corner_branding];\
-            \
-            [1:v]\
-            scale=540:540,\
-            format=rgba,\
-            fade=t=in:st=${FINAL_START}:d=0.7:alpha=1\
-            [final_logo];\
-            \
-            [corner_branding][final_logo]\
-            overlay=\
-            x=(W-w)/2:\
-            y=(H-h)/2:\
-            enable='gte(t,${FINAL_START})'\
-            [clean]" \
+            [2:v]scale=560:560,format=rgba,fade=t=in:st=${FINAL_START}:d=0.60:alpha=1[final_logo];\
+            [corner_branding][final_logo]overlay=x=(W-w)/2:y=(H-h)/2:enable='gte(t,${FINAL_START})'[clean]" \
             -map "[clean]" \
             -map 0:a? \
             -t "$DURATION" \
@@ -277,6 +192,16 @@ jobs:
             -of csv=p=0 \
             output/clean_master.mp4)
 
+          CLEAN_DURATION=$(ffprobe \
+            -v error \
+            -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 \
+            output/clean_master.mp4)
+
+          echo "Stage 01:"
+          echo "${WIDTH}x${HEIGHT}"
+          echo "$CLEAN_DURATION segundos"
+
           if [ "$WIDTH" != "1080" ] || [ "$HEIGHT" != "1920" ]; then
             echo "ERRO: Stage 01 fora de 1080x1920."
             exit 1
@@ -285,14 +210,21 @@ jobs:
           echo "STAGE 01 VALIDADO."
 
       # =========================================================
-      # STAGE 02
-      # EDITORIAL MASTER
+      # STAGE 02 - EDITORIAL MASTER
+      #
+      # remove audio original
       # =========================================================
 
       - name: Stage 02 - Criar Editorial Master
         shell: bash
         run: |
           set -e
+
+          echo "========================================"
+          echo "STAGE 02 - EDITORIAL MASTER"
+          echo "Fonte: clean_master.mp4"
+          echo "Audio original sera removido"
+          echo "========================================"
 
           ffmpeg -y \
             -i output/clean_master.mp4 \
@@ -312,6 +244,10 @@ jobs:
 
           test -s output/editorial_master.mp4
 
+          echo "========================================"
+          echo "EDITORIAL MASTER"
+          echo "========================================"
+
           ffprobe \
             -v error \
             -show_entries format=duration,size,bit_rate \
@@ -319,6 +255,20 @@ jobs:
             -of default=noprint_wrappers=1 \
             output/editorial_master.mp4 \
             | tee output/editorial_report.txt
+
+          WIDTH=$(ffprobe \
+            -v error \
+            -select_streams v:0 \
+            -show_entries stream=width \
+            -of csv=p=0 \
+            output/editorial_master.mp4)
+
+          HEIGHT=$(ffprobe \
+            -v error \
+            -select_streams v:0 \
+            -show_entries stream=height \
+            -of csv=p=0 \
+            output/editorial_master.mp4)
 
           AUDIO_COUNT=$(ffprobe \
             -v error \
@@ -328,16 +278,26 @@ jobs:
             output/editorial_master.mp4 \
             | wc -l)
 
-          if [ "$AUDIO_COUNT" -ne 0 ]; then
-            echo "ERRO: Stage 02 ainda possui audio."
+          if [ "$WIDTH" != "1080" ] || [ "$HEIGHT" != "1920" ]; then
+            echo "ERRO: Editorial Master fora de 1080x1920."
             exit 1
           fi
 
-          echo "STAGE 02 VALIDADO."
+          if [ "$AUDIO_COUNT" -ne 0 ]; then
+            echo "ERRO: audio original ainda presente."
+            exit 1
+          fi
+
+          echo "========================================"
+          echo "STAGE 02 CONCLUIDO"
+          echo "1080x1920: OK"
+          echo "30 FPS: configurado"
+          echo "Audio original: removido"
+          echo "Editorial Master pronto"
+          echo "========================================"
 
       # =========================================================
-      # STAGE 03
-      # DETECCAO DE CENAS
+      # STAGE 03 - DETECCAO DE CENAS
       # =========================================================
 
       - name: Stage 03 - Detectar Cenas
@@ -367,19 +327,14 @@ jobs:
 
           echo "$DURATION" >> output/scene_report.txt
 
-          awk '!seen[$0]++' \
-            output/scene_report.txt \
-            > output/scene_report_unique.txt
-
-          mv \
-            output/scene_report_unique.txt \
-            output/scene_report.txt
+          awk '!seen[$0]++' output/scene_report.txt > output/scene_report_unique.txt
+          mv output/scene_report_unique.txt output/scene_report.txt
 
           echo "PONTOS DE CENA:"
           cat output/scene_report.txt
 
       # =========================================================
-      # PREVIEWS
+      # STAGE 03 - PREVIEWS
       # =========================================================
 
       - name: Stage 03 - Gerar Previews
