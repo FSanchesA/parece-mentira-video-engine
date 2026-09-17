@@ -1,4 +1,4 @@
-name: Parece Mentira - Video Engine V6
+name: Parece Mentira - Video Engine V7
 
 on:
   workflow_dispatch:
@@ -84,10 +84,14 @@ jobs:
 
           FINAL_START=$(awk -v d="$DURATION" 'BEGIN { printf "%.3f", d-5.0 }')
           FINAL_FULL=$(awk -v d="$DURATION" 'BEGIN { printf "%.3f", d-4.0 }')
+          SMALL_FADE_START=$(awk -v d="$DURATION" 'BEGIN { printf "%.3f", d-4.0 }')
+          SMALL_FADE_END=$(awk -v d="$DURATION" 'BEGIN { printf "%.3f", d-3.0 }')
 
           echo "DURATION=$DURATION" >> "$GITHUB_ENV"
           echo "FINAL_START=$FINAL_START" >> "$GITHUB_ENV"
           echo "FINAL_FULL=$FINAL_FULL" >> "$GITHUB_ENV"
+          echo "SMALL_FADE_START=$SMALL_FADE_START" >> "$GITHUB_ENV"
+          echo "SMALL_FADE_END=$SMALL_FADE_END" >> "$GITHUB_ENV"
 
           ffprobe \
             -v error \
@@ -98,24 +102,27 @@ jobs:
             > output/source_report.txt
 
           echo "Duracao: $DURATION"
-          echo "Inicio final: $FINAL_START"
+          echo "Inicio logo central: $FINAL_START"
           echo "Logo central 100% em: $FINAL_FULL"
+          echo "Fade final logo pequena inicia em: $SMALL_FADE_START"
+          echo "Fade final logo pequena termina em: $SMALL_FADE_END"
 
       # =========================================================
       # STAGE 01 - SOURCE BRANDING
       # =========================================================
 
-      - name: Stage 01 - Branding Ajustado
+      - name: Stage 01 - Branding Ajustado Final
         shell: bash
         run: |
           set -e
 
           echo "========================================"
-          echo "STAGE 01 - BRANDING AJUSTADO"
+          echo "STAGE 01 - BRANDING AJUSTADO FINAL"
           echo "Timeline original preservada"
-          echo "Logo superior ajustada"
-          echo "Logo inferior mantida"
-          echo "Ultimos 5s com logo central"
+          echo "Logo superior menos achatada"
+          echo "Logo inferior menos achatada"
+          echo "Ultima logo pequena fica ate 4s finais"
+          echo "Logo central final mantida"
           echo "========================================"
 
           ffmpeg -y \
@@ -125,7 +132,7 @@ jobs:
             -filter_complex "\
             [0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1[base];\
             \
-            [1:v]scale=270:150,format=rgba,split=9[l1][l2][l3][l4][l5][l6][l7][l8][l9];\
+            [1:v]scale=270:160,format=rgba,split=9[l1][l2][l3][l4][l5][l6][l7][l8][l9];\
             \
             [l1]fade=t=out:st=8.95:d=0.55:alpha=1[top0];\
             [l2]fade=t=in:st=8.60:d=0.40:alpha=1,fade=t=out:st=17.95:d=0.55:alpha=1[bottom0];\
@@ -135,17 +142,17 @@ jobs:
             [l6]fade=t=in:st=44.60:d=0.40:alpha=1,fade=t=out:st=53.95:d=0.55:alpha=1[bottom2];\
             [l7]fade=t=in:st=53.60:d=0.40:alpha=1,fade=t=out:st=62.95:d=0.55:alpha=1[top3];\
             [l8]fade=t=in:st=62.60:d=0.40:alpha=1,fade=t=out:st=71.95:d=0.55:alpha=1[bottom3];\
-            [l9]fade=t=in:st=71.60:d=0.40:alpha=1,fade=t=out:st=${FINAL_START}:d=1.00:alpha=1[top4];\
+            [l9]fade=t=in:st=71.60:d=0.40:alpha=1,fade=t=out:st=${SMALL_FADE_START}:d=1.00:alpha=1[top4];\
             \
-            [base][top0]overlay=x=W-w-18:y=430:enable='between(t,0,9.5)'[v1];\
+            [base][top0]overlay=x=W-w-18:y=420:enable='between(t,0,9.5)'[v1];\
             [v1][bottom0]overlay=x=18:y=H-h-625:enable='between(t,8.6,18.5)'[v2];\
-            [v2][top1]overlay=x=W-w-18:y=430:enable='between(t,17.6,27.5)'[v3];\
+            [v2][top1]overlay=x=W-w-18:y=420:enable='between(t,17.6,27.5)'[v3];\
             [v3][bottom1]overlay=x=18:y=H-h-625:enable='between(t,26.6,36.5)'[v4];\
-            [v4][top2]overlay=x=W-w-18:y=430:enable='between(t,35.6,45.5)'[v5];\
+            [v4][top2]overlay=x=W-w-18:y=420:enable='between(t,35.6,45.5)'[v5];\
             [v5][bottom2]overlay=x=18:y=H-h-625:enable='between(t,44.6,54.5)'[v6];\
-            [v6][top3]overlay=x=W-w-18:y=430:enable='between(t,53.6,63.5)'[v7];\
+            [v6][top3]overlay=x=W-w-18:y=420:enable='between(t,53.6,63.5)'[v7];\
             [v7][bottom3]overlay=x=18:y=H-h-625:enable='between(t,62.6,72.5)'[v8];\
-            [v8][top4]overlay=x=W-w-18:y=430:enable='between(t,71.6,${FINAL_FULL})'[corners];\
+            [v8][top4]overlay=x=W-w-18:y=420:enable='between(t,71.6,${SMALL_FADE_END})'[corners];\
             \
             [2:v]scale=540:540,format=rgba,fade=t=in:st=${FINAL_START}:d=1.0:alpha=1[final_logo];\
             [corners][final_logo]overlay=x=(W-w)/2:y=(H-h)/2:enable='gte(t,${FINAL_START})'[clean]" \
