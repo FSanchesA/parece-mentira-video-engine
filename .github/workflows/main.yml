@@ -1,4 +1,4 @@
-name: Parece Mentira - Video Engine V2
+name: Parece Mentira - Video Engine V3
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ concurrency:
 jobs:
   render-video:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
 
     steps:
 
@@ -103,51 +103,77 @@ jobs:
       # STAGE 01
       # SOURCE CLEANING / BRANDING
       #
-      # REGRA:
-      # NAO cortar
-      # NAO reordenar
-      # NAO alterar velocidade
+      # Timeline original permanece intacta.
       #
-      # A timeline original precisa permanecer intacta.
+      # Ciclo Instagram observado:
+      #
+      # 00-08  superior
+      # 08-09  transicao
+      # 09-17  inferior
+      # 17-18  transicao
+      #
+      # repete a cada 18 segundos.
+      #
+      # Durante a transicao existe sobreposicao das duas logos
+      # para impedir que a marca original fique descoberta.
       # =========================================================
 
-      - name: Stage 01 - Source Branding
+      - name: Stage 01 - Branding Animado
         shell: bash
         run: |
           set -e
 
           echo "========================================"
-          echo "STAGE 01 - SOURCE BRANDING"
+          echo "STAGE 01 - BRANDING ANIMADO"
           echo "Timeline original preservada"
+          echo "Logo 180x135"
+          echo "Transicao cruzada de 1 segundo"
           echo "========================================"
 
           ffmpeg -y \
             -i "$VIDEO" \
-            -i "./logo_parece_mentira.png" \
+            -loop 1 -framerate 30 -i "./logo_parece_mentira.png" \
             -filter_complex "\
             [0:v]\
             scale=1080:1920:force_original_aspect_ratio=increase,\
             crop=1080:1920,\
             setsar=1\
             [base];\
+            \
             [1:v]\
-            scale=150:150,\
-            format=rgba\
-            [logo];\
-            [logo]split=2[logo_top][logo_bottom];\
-            [base][logo_top]\
+            scale=180:135,\
+            format=rgba,\
+            split=2\
+            [topraw][bottomraw];\
+            \
+            [topraw]\
+            colorchannelmixer=aa='\
+            if(lt(mod(t,18),8),1,\
+            if(lt(mod(t,18),9),9-mod(t,18),\
+            if(lt(mod(t,18),17),0,\
+            if(lt(mod(t,18),18),mod(t,18)-17,1))))'\
+            [top];\
+            \
+            [bottomraw]\
+            colorchannelmixer=aa='\
+            if(lt(mod(t,18),8),0,\
+            if(lt(mod(t,18),9),mod(t,18)-8,\
+            if(lt(mod(t,18),17),1,\
+            if(lt(mod(t,18),18),18-mod(t,18),0))))'\
+            [bottom];\
+            \
+            [base][top]\
             overlay=\
-            x=W-w-90:\
+            x=W-w-55:\
             y=420:\
-            eof_action=repeat:\
-            enable='lt(mod(t,18),8)'\
+            eof_action=repeat\
             [v1];\
-            [v1][logo_bottom]\
+            \
+            [v1][bottom]\
             overlay=\
-            x=120:\
+            x=105:\
             y=H-h-610:\
-            eof_action=repeat:\
-            enable='between(mod(t,18),9,17)'\
+            eof_action=repeat\
             [clean]" \
             -map "[clean]" \
             -map 0:a? \
@@ -162,7 +188,7 @@ jobs:
             output/clean_master.mp4
 
       # =========================================================
-      # VALIDACAO STAGE 01
+      # VALIDAR STAGE 01
       # =========================================================
 
       - name: Validar Stage 01
@@ -192,9 +218,8 @@ jobs:
             -of default=noprint_wrappers=1:nokey=1 \
             output/clean_master.mp4)
 
-          echo "Stage 01:"
-          echo "${WIDTH}x${HEIGHT}"
-          echo "$CLEAN_DURATION segundos"
+          echo "Resolucao: ${WIDTH}x${HEIGHT}"
+          echo "Duracao: $CLEAN_DURATION"
 
           if [ "$WIDTH" != "1080" ] || [ "$HEIGHT" != "1920" ]; then
             echo "ERRO: Stage 01 fora de 1080x1920."
@@ -207,13 +232,8 @@ jobs:
       # STAGE 02
       # EDITORIAL MASTER
       #
-      # A partir daqui a timeline original pode ser alterada.
-      #
-      # Neste primeiro modulo:
-      # - usa somente o Clean Master
-      # - remove audio original
-      # - normaliza FPS
-      # - prepara master editorial
+      # A partir daqui podemos modificar a timeline.
+      # Audio original removido.
       # =========================================================
 
       - name: Stage 02 - Criar Editorial Master
@@ -223,7 +243,6 @@ jobs:
 
           echo "========================================"
           echo "STAGE 02 - EDITORIAL MASTER"
-          echo "Fonte: clean_master.mp4"
           echo "Audio original sera removido"
           echo "========================================"
 
@@ -239,7 +258,7 @@ jobs:
             output/editorial_master.mp4
 
       # =========================================================
-      # VALIDACAO STAGE 02
+      # VALIDAR STAGE 02
       # =========================================================
 
       - name: Validar Stage 02
@@ -248,10 +267,6 @@ jobs:
           set -e
 
           test -s output/editorial_master.mp4
-
-          echo "========================================"
-          echo "EDITORIAL MASTER"
-          echo "========================================"
 
           ffprobe \
             -v error \
@@ -293,16 +308,118 @@ jobs:
             exit 1
           fi
 
+          echo "STAGE 02 VALIDADO."
+
+      # =========================================================
+      # STAGE 03
+      # SCENE DETECTION
+      #
+      # Analisa mudancas visuais significativas.
+      #
+      # Ainda NAO corta o video.
+      # Ainda NAO reordena cenas.
+      #
+      # Apenas cria o mapa editorial.
+      # =========================================================
+
+      - name: Stage 03 - Detectar Cenas
+        shell: bash
+        run: |
+          set -e
+
           echo "========================================"
-          echo "STAGE 02 CONCLUIDO"
-          echo "1080x1920: OK"
-          echo "30 FPS: configurado"
-          echo "Audio original: removido"
-          echo "Editorial Master pronto"
+          echo "STAGE 03 - SCENE DETECTION"
+          echo "Analisando mudancas visuais..."
+          echo "========================================"
+
+          ffmpeg \
+            -hide_banner \
+            -i output/editorial_master.mp4 \
+            -vf "select='gt(scene,0.32)',showinfo" \
+            -an \
+            -f null - \
+            2> output/scene_detection_raw.txt || true
+
+          grep "showinfo" \
+            output/scene_detection_raw.txt \
+            | grep "pts_time:" \
+            | sed -n 's/.*pts_time:\([^ ]*\).*/\1/p' \
+            > output/scene_times.txt || true
+
+          echo "0.000000" > output/scene_report.txt
+
+          if [ -s output/scene_times.txt ]; then
+            cat output/scene_times.txt >> output/scene_report.txt
+          fi
+
+          echo "$DURATION" >> output/scene_report.txt
+
+          awk '!seen[$0]++' \
+            output/scene_report.txt \
+            > output/scene_report_unique.txt
+
+          mv \
+            output/scene_report_unique.txt \
+            output/scene_report.txt
+
+          SCENE_COUNT=$(wc -l < output/scene_report.txt)
+
+          echo "========================================"
+          echo "PONTOS EDITORIAIS DETECTADOS"
+          echo "========================================"
+
+          cat output/scene_report.txt
+
+          echo "========================================"
+          echo "Total de pontos: $SCENE_COUNT"
           echo "========================================"
 
       # =========================================================
-      # PACOTE DE SAIDA
+      # STAGE 03 - GERAR PREVIEWS
+      #
+      # Cria uma imagem de cada ponto detectado.
+      # Isso vai permitir validar visualmente as cenas.
+      # =========================================================
+
+      - name: Stage 03 - Gerar Previews
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p output/scenes
+
+          INDEX=1
+
+          while read TIME; do
+
+            if [ -z "$TIME" ]; then
+              continue
+            fi
+
+            printf -v NUMBER "%03d" "$INDEX"
+
+            ffmpeg -y \
+              -ss "$TIME" \
+              -i output/editorial_master.mp4 \
+              -frames:v 1 \
+              -vf "scale=360:-2" \
+              -q:v 3 \
+              "output/scenes/scene_${NUMBER}_${TIME}s.jpg" \
+              >/dev/null 2>&1 || true
+
+            INDEX=$((INDEX + 1))
+
+          done < output/scene_report.txt
+
+          echo "Previews gerados:"
+
+          find output/scenes \
+            -type f \
+            -iname "*.jpg" \
+            | sort
+
+      # =========================================================
+      # PACOTES
       # =========================================================
 
       - name: Disponibilizar Stage 01
@@ -321,5 +438,17 @@ jobs:
             output/editorial_master.mp4
             output/source_report.txt
             output/editorial_report.txt
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Disponibilizar Stage 03
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-03-scene-analysis
+          path: |
+            output/scene_report.txt
+            output/scene_times.txt
+            output/scene_detection_raw.txt
+            output/scenes/*.jpg
           retention-days: 7
           if-no-files-found: error
