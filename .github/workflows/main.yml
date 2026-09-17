@@ -1,4 +1,4 @@
-name: Parece Mentira - Video Engine V15.13 Musica Audivel - Narracao Preservada
+name: Parece Mentira - Video Engine V15.14 Musica Audivel Validada
 on:
   workflow_dispatch:
     inputs:
@@ -2516,10 +2516,10 @@ jobs:
             -f lavfi \
             -i "anoisesrc=color=pink:sample_rate=48000:duration=${VIDEO_DURATION}:amplitude=0.18" \
             -filter_complex "\
-              [0:a]volume=0.22,lowpass=f=180[a0];\
-              [1:a]volume=0.14,lowpass=f=230[a1];\
-              [2:a]volume=0.08,lowpass=f=300[a2];\
-              [3:a]lowpass=f=900,highpass=f=120,volume=0.10[a3];\
+              [0:a]volume=0.45,lowpass=f=180[a0];\
+              [1:a]volume=0.32,lowpass=f=230[a1];\
+              [2:a]volume=0.20,lowpass=f=300[a2];\
+              [3:a]lowpass=f=900,highpass=f=120,volume=0.18[a3];\
               [a0][a1][a2][a3]amix=inputs=4:normalize=0,\
               tremolo=f=0.11:d=0.16,\
               aecho=0.8:0.25:1100:0.12,\
@@ -2527,7 +2527,7 @@ jobs:
               lowpass=f=1800,\
               afade=t=in:st=0:d=1.8,\
               afade=t=out:st=${FADE_OUT_START}:d=2.2,\
-              loudnorm=I=-30:TP=-8:LRA=5,\
+              loudnorm=I=-26:TP=-8:LRA=5,\
               aformat=sample_rates=48000:channel_layouts=stereo[bed]" \
             -map "[bed]" \
             -c:a aac \
@@ -2538,17 +2538,21 @@ jobs:
 
           BED_MEAN=$(ffmpeg             -hide_banner             -i output/stage09/original_bed.m4a             -af volumedetect             -f null - 2>&1             | sed -n 's/.*mean_volume: \([-0-9.]*\) dB.*/\1/p'             | tail -1)
 
+          BED_MAX=$(ffmpeg             -hide_banner             -i output/stage09/original_bed.m4a             -af volumedetect             -f null - 2>&1             | sed -n 's/.*max_volume: \([-0-9.]*\) dB.*/\1/p'             | tail -1)
+
           if [ -z "$BED_MEAN" ]; then
-            echo "ERRO: nao foi possivel medir o volume da trilha."
+            echo "ERRO: nao foi possivel medir o volume da musica."
             exit 1
           fi
 
-          BED_TOO_LOW=$(awk             -v v="$BED_MEAN"             'BEGIN { if (v < -40.0) print 1; else print 0 }')
+          BED_TOO_LOW=$(awk             -v v="$BED_MEAN"             'BEGIN { if (v < -34.0) print 1; else print 0 }')
 
-          echo "Volume medio da trilha: ${BED_MEAN} dB"
+          echo "Volume medio da musica: ${BED_MEAN} dB"
+          echo "Pico da musica: ${BED_MAX} dB"
 
           if [ "$BED_TOO_LOW" = "1" ]; then
-            echo "ERRO: trilha ficou praticamente inaudivel."
+            echo "ERRO: a musica ficou baixa demais para ser audivel."
+            echo "O workflow vai falhar em vez de entregar trilha muda."
             exit 1
           fi
 
@@ -2609,10 +2613,10 @@ jobs:
                 asplit=2[voice_mix][voice_sc];\
                 [1:a]aresample=48000,\
                 aformat=sample_fmts=fltp:channel_layouts=stereo,\
-                volume=0.55[bedpre];\
+                volume=0.65[bedpre];\
                 [bedpre][voice_sc]sidechaincompress=\
-                threshold=0.030:ratio=4:attack=20:release=420:makeup=1[ducked];\
-                [ducked]volume=0.85[bedlow];\
+                threshold=0.030:ratio=3:attack=20:release=420:makeup=1[ducked];\
+                [ducked]volume=0.80[bedlow];\
                 [voice_mix][bedlow]amix=inputs=2:duration=first:dropout_transition=0,\
                 alimiter=limit=0.94[mix]" \
               -map 0:v:0 \
@@ -2672,7 +2676,7 @@ jobs:
           echo "STAGE 09 TRILHA + DUCKING VALIDADO"
           echo "Trilha externa: NAO"
           echo "Trilha procedural original: SIM"
-          echo "Volume de fundo: BAIXO, MAS AUDIVEL"
+          echo "Volume de fundo: BAIXO, MAS AUDIVEL E VALIDADO"
           echo "Ducking durante locucao: ATIVO"
           echo "Voz dividida para sidechain + mix: OK"
           echo "Fade-in / fade-out: ATIVOS"
@@ -2721,7 +2725,7 @@ jobs:
           fi
 
           echo "========================================"
-          echo "V15.13 MUSICA AUDIVEL - NARRACAO PRESERVADA VALIDADO"
+          echo "V15.14 MUSICA AUDIVEL VALIDADA"
           echo "Vision: OK"
           echo "Prompt opcional: OK"
           echo "Video sem narracao: suportado"
