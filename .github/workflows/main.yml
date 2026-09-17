@@ -1,4 +1,4 @@
-name: Parece Mentira - Video Engine V15 AI Director
+name: Parece Mentira - Video Engine V15.1 Gemini AI Director
 on:
   workflow_dispatch:
     inputs:
@@ -766,63 +766,67 @@ jobs:
           test "$(find output/stage06_vision/sheets -name 'scene_*.jpg' | wc -l)" -gt 0
 
       # =========================================================
-      # STAGE 06 - AI DIRECTOR MULTIMODAL
+      # STAGE 06 - AI DIRECTOR MULTIMODAL - GEMINI
       #
       # Requer secret no GitHub:
-      # OPENAI_API_KEY
+      # GEMINI_API_KEY
       #
-      # O diretor recebe:
-      # - prompt opcional do usuario
-      # - modo escolhido
-      # - transcricao
-      # - duracao de cada cena
-      # - contact sheet de cada cena
-      #
-      # Ele devolve UM plano editorial completo em JSON:
-      # historia + timeline + narracao + incremento.
+      # Usa Gemini 3.8 Flash no Free Tier recorrente,
+      # sujeito aos limites de uso definidos pelo Google.
       # =========================================================
 
-      - name: Stage 06 - Instalar OpenAI SDK
+      - name: Stage 06 - Instalar Gemini SDK
         shell: bash
         run: |
           set -e
-          python3 -m pip install --upgrade openai
+          python3 -m pip install --upgrade google-genai
 
-      - name: Stage 06 - AI Director
+      - name: Stage 06 - AI Director Gemini
         shell: bash
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           USER_CONTEXT: ${{ inputs.contexto }}
           USER_MODE: ${{ inputs.modo }}
         run: |
           set -e
 
-          if [ -z "$OPENAI_API_KEY" ]; then
-            echo "ERRO: secret OPENAI_API_KEY nao configurado."
+          if [ -z "$GEMINI_API_KEY" ]; then
+            echo "ERRO: secret GEMINI_API_KEY nao configurado."
             echo "GitHub > Settings > Secrets and variables > Actions"
             exit 1
           fi
 
           mkdir -p output/stage06_ai
 
-          cat > /tmp/ai_director.py <<'PY'
-          import base64
+          cat > /tmp/ai_director_gemini.py <<'PY'
           import json
           import os
           import re
           from pathlib import Path
-          from openai import OpenAI
 
-          client = OpenAI(
-              api_key=os.environ["OPENAI_API_KEY"]
+          from google import genai
+          from google.genai import types
+
+          client = genai.Client(
+              api_key=os.environ["GEMINI_API_KEY"]
           )
 
-          user_context = os.getenv("USER_CONTEXT", "").strip()
-          user_mode = os.getenv("USER_MODE", "AUTO").strip()
+          user_context = os.getenv(
+              "USER_CONTEXT",
+              ""
+          ).strip()
+
+          user_mode = os.getenv(
+              "USER_MODE",
+              "AUTO"
+          ).strip()
 
           manifest = json.loads(
-              Path("output/stage05/scene_manifest.json")
-              .read_text(encoding="utf-8")
+              Path(
+                  "output/stage05/scene_manifest.json"
+              ).read_text(
+                  encoding="utf-8"
+              )
           )
 
           original_transcript = Path(
@@ -832,100 +836,106 @@ jobs:
           ).strip()
 
           total_duration = sum(
-              float(s["duration"]) for s in manifest
+              float(s["duration"])
+              for s in manifest
           )
 
-          # Reserva pequena para o encerramento visual.
-          narration_target = max(total_duration - 2.0, 8.0)
+          narration_target = max(
+              total_duration - 2.0,
+              8.0
+          )
 
-          # Alvo aproximado de palavras para voz natural em PT-BR.
           target_words = max(
               20,
-              int(narration_target * 2.25)
+              int(narration_target * 2.15)
           )
 
           instructions = f"""
           Voce e o DIRETOR EDITORIAL MULTIMODAL do canal PARECE MENTIRA.
 
           Sua tarefa e criar UM plano conjunto de VIDEO + NARRACAO.
-          Nao monte primeiro o video e depois tente encaixar a fala.
-          Imagem e narracao devem nascer sincronizadas.
+          Imagem, ritmo e narracao devem nascer sincronizados.
 
-          DADOS:
-          - Duracao visual total disponivel: {total_duration:.2f}s
-          - Duracao alvo de narracao: ate {narration_target:.2f}s
-          - Alvo aproximado: no maximo {target_words} palavras
+          DADOS DO EPISODIO:
+          - Duracao visual disponivel: {total_duration:.2f}s
+          - Duracao alvo maxima de narracao: {narration_target:.2f}s
+          - Alvo aproximado de palavras: no maximo {target_words}
           - Modo solicitado: {user_mode}
-          - Contexto do usuario: {user_context or "[nao informado]"}
-          - Transcricao original: {original_transcript or "[sem narracao detectada]"}
+          - Contexto fornecido pelo usuario:
+            {user_context or "[nao informado]"}
+          - Transcricao original:
+            {original_transcript or "[sem narracao detectada]"}
 
           REGRAS OBRIGATORIAS:
 
           1. ENTENDA AS IMAGENS.
-             Cada cena tera uma contact sheet com 3 momentos.
-             Use o visual para saber o que realmente aparece.
+             Cada cena vem com uma contact sheet de tres momentos.
+             Use o visual para entender o que realmente acontece.
 
           2. COERENCIA VISUAL.
-             Nunca coloque uma fala sobre uma cena que contradiga o que aparece.
-             A troca de cena pode ocorrer no meio de uma frase, desde que a
-             proxima imagem continue coerente com aquela frase.
+             Nunca coloque uma fala sobre uma imagem que contradiga o que aparece.
+             A troca de cena pode ocorrer no meio de uma frase se a proxima
+             imagem continuar coerente com aquela frase.
 
           3. ORDEM.
-             NAO e obrigatorio reordenar.
-             Se a sequencia original ja for boa, mantenha.
-             Reordene apenas quando houver ganho narrativo claro.
+             Nao e obrigatorio reordenar.
+             Se a sequencia original for boa, mantenha.
+             Reordene apenas quando houver ganho narrativo real.
 
           4. MODO AUTO.
              Se houver narracao original util, use-a como fonte principal.
-             Se houver pouca ou nenhuma narracao, crie uma nova usando:
-             imagens + contexto do usuario + pesquisa factual.
+             Se houver pouca ou nenhuma narracao, crie uma nova a partir das
+             imagens e do contexto do usuario.
 
           5. MODO ORIGINAL.
-             Preserve os fatos e a progressao da narracao original.
-             Pode reescrever apenas para dar fluidez e conexao.
+             Preserve fatos, progressao e significado da narracao original.
+             Pode reescrever apenas para naturalidade e conexao.
 
           6. MODO NOVA.
-             Crie uma narracao nova, factual e natural, baseada no que realmente
-             aparece e no contexto pesquisado.
+             Crie uma narracao nova, natural e coerente com as imagens.
 
           7. MODO SEM_NARRACAO.
-             narration deve ser string vazia.
-             Ainda crie a melhor timeline visual possivel.
+             Todos os campos narration devem ficar vazios.
+             Ainda construa a melhor timeline visual possivel.
 
           8. VIDEO SEM AUDIO.
-             O contexto do usuario e uma pista forte, nao uma verdade absoluta.
-             Confirme fatos com pesquisa web antes de afirmar nomes, locais,
-             datas ou eventos especificos.
-             Se nao conseguir confirmar, nao invente.
+             O contexto do usuario e uma pista editorial forte.
+             Nao invente nomes, locais, datas ou fatos especificos que nao
+             estejam sustentados pelo contexto ou pelo material visual.
+             Quando houver incerteza, prefira linguagem descritiva.
 
           9. INCREMENTO EXTERNO.
              Use no maximo 1.
-             Ele deve ter funcao narrativa e deve ser narrado quando houver voz.
              Escolha:
-             - map: quando localizacao/rota/regiao realmente ajudar.
-             - fact_card: para um fato contextual curto.
-             - none: se nenhum incremento melhorar o episodio.
+             - map: quando localizacao, rota ou regiao realmente ajudar.
+             - fact_card: quando um fato contextual curto ajudar.
+             - none: quando nenhum incremento melhorar o episodio.
+             Se houver narracao, o incremento deve ser narrado enquanto aparece.
 
           10. DURACAO.
               Nunca planeje narracao maior que o video.
               Nunca dependa de congelar o ultimo frame.
-              Prefira menos texto e mais naturalidade.
+              Prefira menos palavras e mais naturalidade.
 
           11. TIMELINE.
-              Cada item deve apontar para uma cena real.
-              A duracao de um item do tipo scene deve ser:
-              - maior que 1.0s
-              - no maximo a duracao original da cena * 1.10
-              A soma das duracoes deve ficar proxima da duracao disponivel.
-              Voce pode omitir cenas que nao agregam.
+              Cada item aponta para uma cena real ou para o incremento.
+              Para itens scene:
+              - duracao maior que 1.0s
+              - duracao no maximo 110% da duracao original
+              - pode omitir cenas que nao agregam
+              - evite cortar uma acao importante no meio
 
-          12. NARRACAO POR ITEM.
-              O texto de cada timeline item representa o que deve ser dito
-              enquanto aquela imagem aparece.
-              Escreva frases que se conectem naturalmente entre os itens.
-              Sem reinicios artificiais.
+          12. NARRACAO DA TIMELINE.
+              O texto de cada item representa o que deve ser dito enquanto
+              aquela imagem aparece.
+              Os trechos devem formar UMA narracao continua e natural.
+              Nao reinicie o assunto a cada cena.
 
-          13. ENCERRAMENTO.
+          13. RITMO.
+              Nao precisa preencher todos os segundos com fala.
+              Pode deixar pequenos respiros visuais.
+
+          14. ENCERRAMENTO.
               Quando houver narracao, termine naturalmente com:
               "Parece mentira. Mas aconteceu."
 
@@ -936,8 +946,8 @@ jobs:
             "mode_used": "AUTO|ORIGINAL|NOVA|SEM_NARRACAO",
             "research_notes": [
               {{
-                "fact": "fato usado",
-                "source": "url ou fonte"
+                "fact": "fato utilizado",
+                "source": "origem do fato ou contexto do usuario"
               }}
             ],
             "increment": {{
@@ -966,68 +976,59 @@ jobs:
           }}
 
           Para kind=increment, use scene=null.
-          O incremento deve aparecer no lugar exato da historia em que sua
-          narracao faz sentido.
+          O incremento deve entrar exatamente no ponto em que sua narracao
+          fizer sentido.
           """
 
-          content = [
-              {
-                  "type": "input_text",
-                  "text": instructions
-              }
-          ]
+          contents = [instructions]
 
           for scene in manifest:
               num = int(scene["scene"])
-              sheet = Path(
-                  f"output/stage06_vision/sheets/scene_{num:03d}.jpg"
-              )
 
-              b64 = base64.b64encode(
-                  sheet.read_bytes()
-              ).decode("ascii")
+              sheet = Path(
+                  f"output/stage06_vision/sheets/"
+                  f"scene_{num:03d}.jpg"
+              )
 
               scene_info = (
                   f"CENA {num:03d} | "
                   f"duracao={float(scene['duration']):.2f}s | "
-                  f"fala_original={scene.get('transcript') or '[sem fala]'}"
+                  f"fala_original="
+                  f"{scene.get('transcript') or '[sem fala]'}"
               )
 
-              content.append({
-                  "type": "input_text",
-                  "text": scene_info
-              })
+              contents.append(scene_info)
 
-              content.append({
-                  "type": "input_image",
-                  "image_url": f"data:image/jpeg;base64,{b64}",
-                  "detail": "low"
-              })
+              contents.append(
+                  types.Part.from_bytes(
+                      data=sheet.read_bytes(),
+                      mime_type="image/jpeg"
+                  )
+              )
 
-          response = client.responses.create(
-              model="gpt-5.4-mini",
-              tools=[
-                  {
-                      "type": "web_search"
-                  }
-              ],
-              input=[
-                  {
-                      "role": "user",
-                      "content": content
-                  }
-              ]
+          response = client.models.generate_content(
+              model="gemini-3.8-flash",
+              contents=contents,
+              config=types.GenerateContentConfig(
+                  response_mime_type="application/json",
+                  temperature=0.35
+              )
           )
 
-          raw = response.output_text.strip()
+          raw = (response.text or "").strip()
 
-          # Remove fences caso o modelo as inclua.
+          if not raw:
+              raise RuntimeError(
+                  "Gemini retornou resposta vazia."
+              )
+
           raw = re.sub(
               r"^```(?:json)?\s*",
               "",
               raw,
               flags=re.I
           )
+
           raw = re.sub(
               r"\s*```$",
               "",
@@ -1042,37 +1043,83 @@ jobs:
                   raw,
                   flags=re.S
               )
+
               if not match:
-                  raise
+                  raise RuntimeError(
+                      "Gemini nao retornou JSON valido."
+                  )
 
-              plan = json.loads(match.group(0))
+              plan = json.loads(
+                  match.group(0)
+              )
 
-          # Validacoes basicas.
-          timeline = plan.get("timeline", [])
+          timeline = plan.get(
+              "timeline",
+              []
+          )
+
           if not timeline:
               raise RuntimeError(
-                  "AI Director retornou timeline vazia."
+                  "Gemini retornou timeline vazia."
               )
 
           valid_scenes = {
-              int(s["scene"]) for s in manifest
+              int(s["scene"])
+              for s in manifest
+          }
+
+          original_durations = {
+              int(s["scene"]): float(s["duration"])
+              for s in manifest
           }
 
           for item in timeline:
               kind = item.get("kind")
 
+              if kind not in (
+                  "scene",
+                  "increment"
+              ):
+                  raise RuntimeError(
+                      f"kind invalido: {kind}"
+                  )
+
+              duration = float(
+                  item.get("duration", 0)
+              )
+
+              if duration <= 0:
+                  raise RuntimeError(
+                      "Item com duracao invalida."
+                  )
+
               if kind == "scene":
                   scene = item.get("scene")
+
                   if scene not in valid_scenes:
                       raise RuntimeError(
                           f"Cena invalida no plano: {scene}"
                       )
 
-              duration = float(item.get("duration", 0))
-              if duration <= 0:
-                  raise RuntimeError(
-                      "Item com duracao invalida."
+                  max_allowed = (
+                      original_durations[scene] * 1.10
                   )
+
+                  if duration > max_allowed + 0.05:
+                      item["duration"] = round(
+                          max_allowed,
+                          3
+                      )
+
+          timeline_duration = sum(
+              float(i["duration"])
+              for i in timeline
+          )
+
+          if timeline_duration <= 1:
+              raise RuntimeError(
+                  "Duracao total da timeline invalida."
+              )
 
           Path(
               "output/stage06_ai/director_plan.json"
@@ -1092,16 +1139,26 @@ jobs:
               encoding="utf-8"
           )
 
-          print(json.dumps(
-              plan,
-              ensure_ascii=False,
-              indent=2
-          ))
+          Path(
+              "output/stage06_ai/provider.txt"
+          ).write_text(
+              "Gemini 3.8 Flash\n",
+              encoding="utf-8"
+          )
+
+          print(
+              json.dumps(
+                  plan,
+                  ensure_ascii=False,
+                  indent=2
+              )
+          )
           PY
 
-          python3 /tmp/ai_director.py
+          python3 /tmp/ai_director_gemini.py
 
           test -s output/stage06_ai/director_plan.json
+          test -s output/stage06_ai/provider.txt
 
       # =========================================================
       # STAGE 07 - CRIAR INCREMENTO GENERICO
@@ -1779,11 +1836,11 @@ jobs:
           fi
 
           echo "========================================"
-          echo "V15 AI DIRECTOR VALIDADO"
+          echo "V15.1 GEMINI AI DIRECTOR VALIDADO"
           echo "Vision: OK"
           echo "Prompt opcional: OK"
           echo "Video sem narracao: suportado"
-          echo "Pesquisa web: habilitada"
+          echo "Diretor multimodal Gemini: OK"
           echo "Freeze final: removido"
           echo "========================================"
 
@@ -1825,10 +1882,11 @@ jobs:
       - name: Disponibilizar AI Director
         uses: actions/upload-artifact@v4
         with:
-          name: stage-06-ai-director
+          name: stage-06-gemini-ai-director
           path: |
             output/stage06_ai/director_plan.json
             output/stage06_ai/director_raw.txt
+            output/stage06_ai/provider.txt
           retention-days: 7
           if-no-files-found: error
 
@@ -1846,7 +1904,7 @@ jobs:
       - name: Disponibilizar Final V15
         uses: actions/upload-artifact@v4
         with:
-          name: stage-08-ai-director-final
+          name: stage-08-gemini-director-final
           path: |
             output/stage07/ai_visual_master.mp4
             output/stage08/narration.txt
