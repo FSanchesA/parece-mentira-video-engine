@@ -1,4 +1,4 @@
-name: Parece Mentira - Video Engine V15.3 Auto + Plano Manual
+name: Parece Mentira - Video Engine V15.4 Gemini Editorial Director
 on:
   workflow_dispatch:
     inputs:
@@ -855,8 +855,16 @@ jobs:
           instructions = f"""
           Voce e o DIRETOR EDITORIAL MULTIMODAL do canal PARECE MENTIRA.
 
-          Sua tarefa e criar UM plano conjunto de VIDEO + NARRACAO.
-          Imagem, ritmo e narracao devem nascer sincronizados.
+          Sua tarefa NAO e simplesmente reescrever a narracao original.
+          Sua tarefa e EDITAR a historia de forma audiovisual.
+
+          Pense como editor de video curto:
+          - cada corte precisa ter funcao narrativa
+          - a imagem precisa mudar quando a ideia muda
+          - cenas repetitivas devem ser reduzidas
+          - nao use todas as cenas apenas porque existem
+          - nao deixe uma unica tomada longa dominar o video
+          - evite sensacao de slideshow lento ou de voz apenas colocada sobre o original
 
           DADOS DO EPISODIO:
           - Duracao visual disponivel: {total_duration:.2f}s
@@ -868,78 +876,134 @@ jobs:
           - Transcricao original:
             {original_transcript or "[sem narracao detectada]"}
 
+          PRINCIPIO CENTRAL:
+          VIDEO E NARRACAO DEVEM SER PLANEJADOS JUNTOS.
+          Nao monte primeiro o video e depois encaixe a voz.
+          Nao escreva primeiro toda a fala para depois procurar imagens.
+
           REGRAS OBRIGATORIAS:
 
-          1. ENTENDA AS IMAGENS.
+          1. LEIA O VIDEO VISUALMENTE.
              Cada cena vem com uma contact sheet de tres momentos.
-             Use o visual para entender o que realmente acontece.
+             Use as imagens para identificar:
+             - assunto da cena
+             - acao principal
+             - mudanca de enquadramento
+             - repeticao visual
+             - potencial emocional
+             - melhor momento para fala associada
 
-          2. COERENCIA VISUAL.
-             Nunca coloque uma fala sobre uma imagem que contradiga o que aparece.
-             A troca de cena pode ocorrer no meio de uma frase se a proxima
-             imagem continuar coerente com aquela frase.
+          2. NAO USE TODAS AS CENAS POR OBRIGACAO.
+             Se uma cena nao acrescentar informacao, ritmo, emocao ou continuidade,
+             OMITA.
+             Um bom corte e melhor que preencher tempo.
 
-          3. ORDEM.
+          3. CONTROLE DE REPETICAO VISUAL.
+             Se duas cenas mostram praticamente a mesma coisa:
+             - use apenas a melhor
+             OU
+             - use trechos curtos de cada uma
+             OU
+             - intercale com outro elemento relevante.
+             Nunca mantenha repeticao apenas para ocupar tempo.
+
+          4. LIMITE DE TOMADA CONTINUA.
+             Evite deixar uma unica cena por tempo excessivo.
+             Como regra editorial:
+             - cenas comuns: idealmente 2.0 a 6.5 segundos
+             - cenas fortes ou de acao: podem chegar a 8 segundos
+             - acima de 8 segundos so se houver motivo visual muito claro
+             - cenas acima de 10 segundos devem ser fortemente evitadas
+
+          5. IDEIA NOVA = POSSIVEL MUDANCA VISUAL.
+             Quando a narracao muda de assunto, procure uma imagem coerente com
+             essa nova ideia.
+             Nao deixe a mesma imagem atravessar varios blocos narrativos sem motivo.
+
+          6. FALA E IMAGEM DEVEM COMBINAR.
+             Exemplos:
+             - ao falar do piloto, mostrar piloto/cockpit
+             - ao falar dos passageiros, mostrar cabine/passageiros
+             - ao falar de cobertura de TV, mostrar tela/noticiario
+             - ao falar de pouso, mostrar aproximacao/pouso
+             - ao falar de rota/localizacao, usar mapa
+
+          7. A TROCA DE CENA PODE OCORRER NO MEIO DE UMA FRASE.
+             Desde que a nova imagem continue coerente com o que esta sendo dito.
+             Isso e desejavel quando melhora o ritmo.
+
+          8. ORDEM.
              Nao e obrigatorio reordenar.
-             Se a sequencia original for boa, mantenha.
-             Reordene apenas quando houver ganho narrativo real.
+             Mantenha a ordem original se ela for boa.
+             Reordene apenas quando houver ganho narrativo claro.
 
-          4. MODO AUTO.
-             Se houver narracao original util, use-a como fonte principal.
-             Se houver pouca ou nenhuma narracao, crie uma nova a partir das
-             imagens e do contexto do usuario.
+          9. MODO AUTO.
+             Use a narracao original como fonte factual quando ela for util,
+             mas NAO preserve automaticamente sua distribuicao entre cenas.
+             Reescreva e redistribua a fala para casar melhor com o visual.
 
-          5. MODO ORIGINAL.
-             Preserve fatos, progressao e significado da narracao original.
-             Pode reescrever apenas para naturalidade e conexao.
+          10. MODO ORIGINAL.
+              Preserve fatos e progressao geral da narracao original,
+              mas ainda edite visualmente com liberdade.
 
-          6. MODO NOVA.
-             Crie uma narracao nova, natural e coerente com as imagens.
+          11. MODO NOVA.
+              Crie nova narracao natural, factual e audiovisual.
 
-          7. MODO SEM_NARRACAO.
-             Todos os campos narration devem ficar vazios.
-             Ainda construa a melhor timeline visual possivel.
+          12. MODO SEM_NARRACAO.
+              Todos os campos narration devem ficar vazios.
+              Ainda construa a melhor timeline visual possivel.
 
-          8. VIDEO SEM AUDIO.
-             O contexto do usuario e uma pista editorial forte.
-             Nao invente nomes, locais, datas ou fatos especificos que nao
-             estejam sustentados pelo contexto ou pelo material visual.
-             Quando houver incerteza, prefira linguagem descritiva.
+          13. VIDEO SEM AUDIO.
+              Use contexto + imagem.
+              Nao invente nomes, locais ou datas que nao estejam sustentados
+              pelo material recebido.
+              Quando houver incerteza, use linguagem descritiva.
 
-          9. INCREMENTO EXTERNO.
-             Use no maximo 1.
-             Escolha:
-             - map: quando localizacao, rota ou regiao realmente ajudar.
-             - fact_card: quando um fato contextual curto ajudar.
-             - none: quando nenhum incremento melhorar o episodio.
-             Se houver narracao, o incremento deve ser narrado enquanto aparece.
+          14. INCREMENTO EXTERNO.
+              Use no maximo 1.
+              So use se realmente melhorar a compreensao.
+              Escolha:
+              - map: para rota, localizacao ou regiao
+              - fact_card: para contexto factual curto
+              - none: se nao houver ganho editorial
+              Se houver narracao, o incremento deve ser narrado enquanto aparece.
 
-          10. DURACAO.
+          15. DURACAO E RITMO.
               Nunca planeje narracao maior que o video.
               Nunca dependa de congelar o ultimo frame.
-              Prefira menos palavras e mais naturalidade.
+              Prefira cortes mais vivos e texto mais enxuto.
+              E aceitavel terminar o episodio antes da duracao original
+              se isso melhorar o ritmo.
 
-          11. TIMELINE.
-              Cada item aponta para uma cena real ou para o incremento.
-              Para itens scene:
-              - duracao maior que 1.0s
-              - duracao no maximo 110% da duracao original
-              - pode omitir cenas que nao agregam
-              - evite cortar uma acao importante no meio
+          16. NAO ESTIQUE CENA FRACA.
+              Se a cena original tiver 20 segundos mas so 5 segundos sao necessarios,
+              use apenas 5.
+              Nao use slow motion como solucao editorial para preencher tempo.
 
-          12. NARRACAO DA TIMELINE.
-              O texto de cada item representa o que deve ser dito enquanto
-              aquela imagem aparece.
-              Os trechos devem formar UMA narracao continua e natural.
-              Nao reinicie o assunto a cada cena.
-
-          13. RITMO.
-              Nao precisa preencher todos os segundos com fala.
-              Pode deixar pequenos respiros visuais.
-
-          14. ENCERRAMENTO.
+          17. FINAL.
+              O fechamento deve ser o ponto visual mais forte do desfecho.
+              Evite deixar o final se arrastar.
               Quando houver narracao, termine naturalmente com:
               "Parece mentira. Mas aconteceu."
+
+          18. SAIDA EDITORIAL.
+              Cada item da timeline deve representar uma DECISAO DE EDICAO.
+              O campo reason deve explicar por que aquela imagem esta naquele ponto.
+
+          19. DURACAO POR ITEM.
+              Para kind=scene:
+              - minimo preferencial: 1.5s
+              - ideal: 2.0 a 6.5s
+              - maximo recomendado: 8.0s
+              - nunca ultrapassar 110% da duracao original
+              - se a cena original for longa, use apenas o trecho necessario
+
+          20. PRIORIDADE DE QUALIDADE.
+              Se precisar escolher entre:
+              - usar mais cenas
+              OU
+              - fazer um video mais curto e coeso,
+              escolha o video mais curto e coeso.
 
           RETORNE SOMENTE JSON VALIDO neste formato:
 
@@ -972,14 +1036,20 @@ jobs:
                 "scene": 1,
                 "duration": 4.5,
                 "narration": "trecho natural da narracao",
-                "reason": "por que esta imagem esta aqui"
+                "reason": "funcao editorial da cena"
               }}
             ]
           }}
 
           Para kind=increment, use scene=null.
-          O incremento deve entrar exatamente no ponto em que sua narracao
-          fizer sentido.
+
+          IMPORTANTE:
+          - timeline pode omitir cenas
+          - timeline pode ser mais curta que o video original
+          - nao existe obrigacao de usar todo o material
+          - nao existe obrigacao de manter a ordem original
+          - nao existe obrigacao de ocupar toda a duracao
+          - priorize ritmo, coerencia visual e sincronismo
           """
 
           contents = [instructions]
@@ -1191,6 +1261,11 @@ jobs:
                           max_allowed,
                           3
                       )
+
+                  # Regra editorial automatica:
+                  # evita que uma tomada comum fique longa demais.
+                  if float(item["duration"]) > 8.0:
+                      item["duration"] = 8.0
 
           timeline_duration = sum(
               float(i["duration"])
@@ -2129,7 +2204,7 @@ jobs:
           fi
 
           echo "========================================"
-          echo "V15.3 AUTO + PLANO MANUAL VALIDADO"
+          echo "V15.4 GEMINI EDITORIAL DIRECTOR VALIDADO"
           echo "Vision: OK"
           echo "Prompt opcional: OK"
           echo "Video sem narracao: suportado"
