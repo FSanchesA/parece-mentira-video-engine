@@ -6,6 +6,7 @@ on:
 jobs:
   render-video:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Baixar repositorio
@@ -36,8 +37,28 @@ jobs:
           fi
 
           echo "VIDEO=$VIDEO" >> "$GITHUB_ENV"
+
           echo "Video encontrado: $VIDEO"
-          echo "Logo encontrada."
+          echo "Logo encontrada: ./logo_parece_mentira.png"
+
+      - name: Analisar duracao original
+        shell: bash
+        run: |
+          set -e
+
+          DURATION=$(ffprobe \
+            -v error \
+            -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 \
+            "$VIDEO")
+
+          if [ -z "$DURATION" ]; then
+            echo "ERRO: nao foi possivel determinar a duracao."
+            exit 1
+          fi
+
+          echo "DURATION=$DURATION" >> "$GITHUB_ENV"
+          echo "Duracao original: $DURATION segundos"
 
       - name: Criar Stage 01
         shell: bash
@@ -45,18 +66,24 @@ jobs:
           set -e
           mkdir -p output
 
+          echo "========================================"
+          echo "STAGE 01 - SOURCE BRANDING"
+          echo "Timeline original sera preservada."
+          echo "Duracao limite: $DURATION segundos"
+          echo "========================================"
+
           ffmpeg -y \
             -i "$VIDEO" \
-            -loop 1 -i "./logo_parece_mentira.png" \
-            -filter_complex "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1[base];[1:v]scale=180:180,format=rgba[logo];[logo]split=2[lt][lb];[base][lt]overlay=x=W-w-70:y=180:enable='lt(mod(t,18),8)'[v1];[v1][lb]overlay=x=70:y=H-h-350:enable='between(mod(t,18),9,17)'[outv]" \
+            -i "./logo_parece_mentira.png" \
+            -filter_complex "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1[base];[1:v]scale=180:180,format=rgba[logo];[logo]split=2[lt][lb];[base][lt]overlay=x=W-w-70:y=180:eof_action=repeat:enable='lt(mod(t,18),8)'[v1];[v1][lb]overlay=x=70:y=H-h-350:eof_action=repeat:enable='between(mod(t,18),9,17)'[outv]" \
             -map "[outv]" \
             -an \
+            -t "$DURATION" \
             -c:v libx264 \
             -preset medium \
             -crf 20 \
             -pix_fmt yuv420p \
             -movflags +faststart \
-            -shortest \
             output/clean_master.mp4
 
       - name: Validar Stage 01
@@ -64,32 +91,56 @@ jobs:
         run: |
           set -e
 
-          test -s output/clean_master.mp4
+          if [ ! -s "output/clean_master.mp4" ]; then
+            echo "ERRO: clean_master.mp4 nao foi criado."
+            exit 1
+          fi
 
-          echo "===== CLEAN MASTER ====="
+          echo "========================================"
+          echo "CLEAN MASTER"
+          echo "========================================"
 
-          ffprobe -v error \
+          ffprobe \
+            -v error \
             -show_entries format=duration,size \
             -show_entries stream=codec_type,codec_name,width,height \
             -of default=noprint_wrappers=1 \
             output/clean_master.mp4
 
-          WIDTH=$(ffprobe -v error -select_streams v:0 \
-            -show_entries stream=width -of csv=p=0 \
+          WIDTH=$(ffprobe \
+            -v error \
+            -select_streams v:0 \
+            -show_entries stream=width \
+            -of csv=p=0 \
             output/clean_master.mp4)
 
-          HEIGHT=$(ffprobe -v error -select_streams v:0 \
-            -show_entries stream=height -of csv=p=0 \
+          HEIGHT=$(ffprobe \
+            -v error \
+            -select_streams v:0 \
+            -show_entries stream=height \
+            -of csv=p=0 \
             output/clean_master.mp4)
+
+          FINAL_DURATION=$(ffprobe \
+            -v error \
+            -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 \
+            output/clean_master.mp4)
+
+          echo "Resolucao final: ${WIDTH}x${HEIGHT}"
+          echo "Duracao final: $FINAL_DURATION segundos"
 
           if [ "$WIDTH" != "1080" ] || [ "$HEIGHT" != "1920" ]; then
             echo "ERRO: resolucao incorreta."
             exit 1
           fi
 
-          echo "STAGE 01 CONCLUIDO."
+          echo "========================================"
+          echo "STAGE 01 CONCLUIDO"
           echo "Timeline original preservada."
-          echo "Arquivo liberado para futura edicao editorial."
+          echo "Branding aplicado antes dos cortes."
+          echo "Clean Master liberado para Stage 02."
+          echo "========================================"
 
       - name: Disponibilizar Clean Master
         uses: actions/upload-artifact@v4
@@ -97,3 +148,4 @@ jobs:
           name: parece-mentira-clean-master
           path: output/clean_master.mp4
           retention-days: 7
+          if-no-files-found: error
