@@ -1,4 +1,4 @@
-name: Parece Mentira - Video Engine V15.7 IA + Acabamento sem IA
+name: Parece Mentira - Video Engine V15.8 Smart Subtitle Blur
 on:
   workflow_dispatch:
     inputs:
@@ -2412,6 +2412,865 @@ jobs:
           test -s output/stage08/final_ai_director.mp4
 
       # =========================================================
+      # STAGE 09 - SMART SUBTITLE DETECTION + BLUR + NEW CAPTIONS
+      #
+      # OBJETIVO:
+      # 1. detectar automaticamente SOMENTE legenda que acompanha locucao
+      # 2. evitar borrar cards, mapas, titulos, logos e textos editoriais
+      # 3. aplicar blur moderno localizado e dinamico
+      # 4. gerar nova legenda sincronizada com a nova narracao
+      #
+      # Este stage NAO usa Gemini e NAO consome cota de IA.
+      # =========================================================
+
+      - name: Stage 09 - Instalar Detector de Legendas
+        shell: bash
+        run: |
+          set -e
+
+          sudo apt-get update
+          sudo apt-get install -y \
+            tesseract-ocr \
+            tesseract-ocr-por \
+            fonts-dejavu-core
+
+          python3 -m pip install \
+            opencv-python-headless \
+            pytesseract \
+            pillow
+
+      - name: Stage 09 - Detectar Legenda Antiga
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p output/stage09/frames
+          mkdir -p output/stage09/annotated
+          mkdir -p output/stage09/debug
+
+          # Amostragem de 2 fps reduz custo sem perder mudancas de legenda.
+          ffmpeg -y \
+            -i output/stage08/final_ai_director.mp4 \
+            -vf "fps=2,scale=540:960" \
+            -q:v 3 \
+            output/stage09/frames/frame_%05d.jpg \
+            >/dev/null 2>&1
+
+          cat > /tmp/detect_old_subtitles.py <<'PY'
+          import json
+          import math
+          import re
+          from pathlib import Path
+          from collections import defaultdict
+
+          import cv2
+          import pytesseract
+          from pytesseract import Output
+
+          FPS_SAMPLE = 2.0
+          FRAME_DIR = Path("output/stage09/frames")
+          ANN_DIR = Path("output/stage09/annotated")
+          OUT_JSON = Path("output/stage09/subtitle_detection.json")
+          OUT_TXT = Path("output/stage09/subtitle_detection.txt")
+
+          frames = sorted(FRAME_DIR.glob("frame_*.jpg"))
+          if not frames:
+              raise RuntimeError("Nenhum frame para detectar legenda.")
+
+          all_candidates = []
+
+          def norm_text(s):
+              s = re.sub(r"\s+", " ", str(s)).strip()
+              s = re.sub(r"[^\wÀ-ÿ0-9!?.,%$€£R$ -]", "", s)
+              return s.strip()
+
+          def group_words(words, h):
+              # Agrupa OCR em linhas aproximadas por coordenada vertical.
+              groups = []
+              for w in sorted(words, key=lambda x: (x["cy"], x["x"])):
+                  placed = False
+                  for g in groups:
+                      if abs(w["cy"] - g["cy"]) <= max(16, 0.025*h):
+                          g["words"].append(w)
+                          g["cy"] = sum(z["cy"] for z in g["words"]) / len(g["words"])
+                          placed = True
+                          break
+                  if not placed:
+                      groups.append({"cy": w["cy"], "words": [w]})
+
+              lines = []
+              for g in groups:
+                  ws = sorted(g["words"], key=lambda z: z["x"])
+                  x1 = min(z["x"] for z in ws)
+                  y1 = min(z["y"] for z in ws)
+                  x2 = max(z["x"] + z["w"] for z in ws)
+                  y2 = max(z["y"] + z["h"] for z in ws)
+                  txt = norm_text(" ".join(z["text"] for z in ws))
+                  conf = sum(z["conf"] for z in ws) / max(len(ws), 1)
+                  lines.append({
+                      "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+                      "text": txt, "conf": conf,
+                      "cy": (y1+y2)/2
+                  })
+              return lines
+
+          for idx, fp in enumerate(frames):
+              img = cv2.imread(str(fp))
+              if img is None:
+                  continue
+
+              h, w = img.shape[:2]
+
+              # OCR em imagem ampliada/contraste melhorado.
+              gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+              clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+              proc = clahe.apply(gray)
+
+              data = pytesseract.image_to_data(
+                  proc,
+                  lang="por",
+                  config="--psm 11",
+                  output_type=Output.DICT
+              )
+
+              words = []
+              n = len(data["text"])
+
+              for i in range(n):
+                  txt = norm_text(data["text"][i])
+                  if len(txt) < 2:
+                      continue
+
+                  try:
+                      conf = float(data["conf"][i])
+                  except Exception:
+                      conf = -1
+
+                  if conf < 35:
+                      continue
+
+                  x = int(data["left"][i])
+                  y = int(data["top"][i])
+                  ww = int(data["width"][i])
+                  hh = int(data["height"][i])
+
+                  if ww < 8 or hh < 8:
+                      continue
+
+                  # Procuramos legenda principalmente na metade inferior.
+                  # O limite sobe ate 40% da tela para tolerar videos diferentes.
+                  if y < int(h * 0.40):
+                      continue
+
+                  # Rejeita texto enorme típico de card/titulo.
+                  if hh > int(h * 0.095):
+                      continue
+
+                  words.append({
+                      "text": txt,
+                      "conf": conf,
+                      "x": x, "y": y, "w": ww, "h": hh,
+                      "cy": y + hh/2
+                  })
+
+              lines = group_words(words, h)
+              frame_candidates = []
+
+              for line in lines:
+                  bw = line["x2"] - line["x1"]
+                  bh = line["y2"] - line["y1"]
+                  cx = (line["x1"] + line["x2"]) / 2
+                  cy = line["cy"]
+
+                  if not line["text"]:
+                      continue
+
+                  # Heuristica de legenda:
+                  # - centralizada
+                  # - largura moderada
+                  # - altura de linha normal
+                  # - nao encosta nas bordas
+                  centered = abs(cx - w/2) <= w * 0.30
+                  width_ok = w * 0.16 <= bw <= w * 0.92
+                  height_ok = 10 <= bh <= h * 0.085
+                  edge_ok = line["x1"] > w*0.025 and line["x2"] < w*0.975
+                  lower_ok = cy >= h * 0.43 and cy <= h * 0.90
+
+                  if centered and width_ok and height_ok and edge_ok and lower_ok:
+                      frame_candidates.append(line)
+
+              # Junta duas linhas proximas, típico de subtitle de 2 linhas.
+              frame_candidates = sorted(frame_candidates, key=lambda z: z["y1"])
+              merged = []
+              used = set()
+
+              for i, a in enumerate(frame_candidates):
+                  if i in used:
+                      continue
+
+                  box = dict(a)
+                  for j in range(i+1, len(frame_candidates)):
+                      if j in used:
+                          continue
+                      b = frame_candidates[j]
+                      vgap = b["y1"] - box["y2"]
+                      if 0 <= vgap <= h*0.055:
+                          # Similaridade horizontal suficiente para legenda em duas linhas.
+                          overlap = max(
+                              0,
+                              min(box["x2"], b["x2"]) - max(box["x1"], b["x1"])
+                          )
+                          smaller = max(
+                              1,
+                              min(box["x2"]-box["x1"], b["x2"]-b["x1"])
+                          )
+                          if overlap / smaller >= 0.30:
+                              box["x1"] = min(box["x1"], b["x1"])
+                              box["y1"] = min(box["y1"], b["y1"])
+                              box["x2"] = max(box["x2"], b["x2"])
+                              box["y2"] = max(box["y2"], b["y2"])
+                              box["text"] = norm_text(box["text"] + " " + b["text"])
+                              box["conf"] = (box["conf"] + b["conf"]) / 2
+                              used.add(j)
+                  merged.append(box)
+
+              t = idx / FPS_SAMPLE
+
+              for box in merged:
+                  box["frame_index"] = idx
+                  box["time"] = round(t, 3)
+                  box["cx"] = (box["x1"] + box["x2"]) / 2
+                  box["cy"] = (box["y1"] + box["y2"]) / 2
+                  box["w"] = box["x2"] - box["x1"]
+                  box["h"] = box["y2"] - box["y1"]
+                  all_candidates.append(box)
+
+          if not all_candidates:
+              result = {
+                  "sample_fps": FPS_SAMPLE,
+                  "status": "no_subtitle_detected",
+                  "intervals": []
+              }
+              OUT_JSON.write_text(
+                  json.dumps(result, ensure_ascii=False, indent=2),
+                  encoding="utf-8"
+              )
+              OUT_TXT.write_text(
+                  "Nenhuma legenda antiga detectada com confianca.\n",
+                  encoding="utf-8"
+              )
+              print("Nenhuma legenda antiga detectada.")
+              raise SystemExit(0)
+
+          # ---------------------------------------------------------
+          # DETECCAO TEMPORAL
+          #
+          # Cards/titulos tendem a:
+          # - permanecer com o mesmo texto
+          # - ocupar areas maiores
+          #
+          # Legendas tendem a:
+          # - permanecer na mesma faixa Y
+          # - trocar de texto ao longo do tempo
+          # ---------------------------------------------------------
+
+          bands = defaultdict(list)
+
+          for c in all_candidates:
+              # banda vertical a cada 5% da altura.
+              band = int(c["cy"] / 48)
+              bands[band].append(c)
+
+          accepted_bands = set()
+
+          for band, items in bands.items():
+              texts = {
+                  norm_text(x["text"]).lower()
+                  for x in items
+                  if len(norm_text(x["text"])) >= 3
+              }
+              times = sorted({x["frame_index"] for x in items})
+
+              # Precisa ocorrer em pelo menos 2 amostras.
+              enough_presence = len(times) >= 2
+
+              # E idealmente mudar texto, característica forte de subtitle.
+              changing_text = len(texts) >= 2
+
+              # Ou aparecer em quantidade suficiente na faixa inferior central.
+              enough_recurrence = len(times) >= 4
+
+              if enough_presence and (changing_text or enough_recurrence):
+                  accepted_bands.add(band)
+
+          accepted = [
+              c for c in all_candidates
+              if int(c["cy"] / 48) in accepted_bands
+          ]
+
+          # Fallback conservador:
+          # se nenhuma banda passou, usa apenas candidatos muito centrais
+          # e pequenos, mas nunca cards grandes.
+          if not accepted:
+              accepted = [
+                  c for c in all_candidates
+                  if abs(c["cx"] - 270) <= 120
+                  and c["w"] <= 470
+                  and c["h"] <= 90
+                  and c["cy"] >= 480
+              ]
+
+          # ---------------------------------------------------------
+          # CRIA INTERVALOS SUAVES
+          # ---------------------------------------------------------
+
+          accepted = sorted(
+              accepted,
+              key=lambda x: (x["time"], x["cy"])
+          )
+
+          intervals = []
+
+          for c in accepted:
+              # Expande bbox para esconder outline/sombra da legenda.
+              pad_x = max(18, int(c["w"] * 0.08))
+              pad_y = max(14, int(c["h"] * 0.35))
+
+              x1 = max(0, c["x1"] - pad_x)
+              y1 = max(0, c["y1"] - pad_y)
+              x2 = min(540, c["x2"] + pad_x)
+              y2 = min(960, c["y2"] + pad_y)
+
+              start = max(0.0, c["time"] - 0.32)
+              end = c["time"] + 0.82
+
+              item = {
+                  "start": round(start, 3),
+                  "end": round(end, 3),
+                  "x1": int(x1),
+                  "y1": int(y1),
+                  "x2": int(x2),
+                  "y2": int(y2),
+                  "text": c["text"],
+                  "confidence": round(float(c["conf"]), 1)
+              }
+
+              if intervals:
+                  p = intervals[-1]
+
+                  same_zone = (
+                      abs(((p["y1"]+p["y2"])/2) - ((item["y1"]+item["y2"])/2)) < 75
+                  )
+                  close_time = item["start"] <= p["end"] + 0.65
+
+                  if same_zone and close_time:
+                      p["end"] = max(p["end"], item["end"])
+                      p["x1"] = min(p["x1"], item["x1"])
+                      p["y1"] = min(p["y1"], item["y1"])
+                      p["x2"] = max(p["x2"], item["x2"])
+                      p["y2"] = max(p["y2"], item["y2"])
+                      p["text"] = item["text"]
+                      p["confidence"] = max(p["confidence"], item["confidence"])
+                      continue
+
+              intervals.append(item)
+
+          # Rejeita regioes absurdamente grandes apos merge.
+          intervals = [
+              x for x in intervals
+              if (x["x2"]-x["x1"]) <= 520
+              and (x["y2"]-x["y1"]) <= 180
+          ]
+
+          result = {
+              "sample_fps": FPS_SAMPLE,
+              "status": "detected" if intervals else "no_subtitle_detected",
+              "intervals": intervals
+          }
+
+          OUT_JSON.write_text(
+              json.dumps(result, ensure_ascii=False, indent=2),
+              encoding="utf-8"
+          )
+
+          with OUT_TXT.open("w", encoding="utf-8") as f:
+              f.write("SMART SUBTITLE DETECTION\n")
+              f.write("="*40 + "\n")
+              f.write(f"Intervalos detectados: {len(intervals)}\n\n")
+              for n, it in enumerate(intervals, start=1):
+                  f.write(
+                      f"{n:02d}. {it['start']:.2f}s - {it['end']:.2f}s | "
+                      f"box=({it['x1']},{it['y1']})-({it['x2']},{it['y2']}) | "
+                      f"{it['text']}\n"
+                  )
+
+          # Gera alguns previews anotados para QA.
+          for idx, c in enumerate(accepted[:18], start=1):
+              frame_idx = int(c["frame_index"]) + 1
+              fp = FRAME_DIR / f"frame_{frame_idx:05d}.jpg"
+              img = cv2.imread(str(fp))
+              if img is None:
+                  continue
+
+              cv2.rectangle(
+                  img,
+                  (int(c["x1"]), int(c["y1"])),
+                  (int(c["x2"]), int(c["y2"])),
+                  (0, 255, 0),
+                  2
+              )
+              cv2.putText(
+                  img,
+                  "SUBTITLE",
+                  (int(c["x1"]), max(20, int(c["y1"])-8)),
+                  cv2.FONT_HERSHEY_SIMPLEX,
+                  0.55,
+                  (0, 255, 0),
+                  2,
+                  cv2.LINE_AA
+              )
+              cv2.imwrite(
+                  str(ANN_DIR / f"detected_{idx:03d}.jpg"),
+                  img
+              )
+
+          print(f"Intervalos de legenda detectados: {len(intervals)}")
+          PY
+
+          python3 /tmp/detect_old_subtitles.py
+
+          test -s output/stage09/subtitle_detection.json
+          test -s output/stage09/subtitle_detection.txt
+
+      - name: Stage 09 - Aplicar Blur Dinamico Inteligente
+        shell: bash
+        run: |
+          set -e
+
+          cat > /tmp/apply_smart_blur.py <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+
+          import cv2
+          import numpy as np
+
+          inp = "output/stage08/final_ai_director.mp4"
+          out_silent = "output/stage09/blurred_silent.mp4"
+
+          det = json.loads(
+              Path("output/stage09/subtitle_detection.json")
+              .read_text(encoding="utf-8")
+          )
+
+          intervals = det.get("intervals", [])
+
+          cap = cv2.VideoCapture(inp)
+
+          if not cap.isOpened():
+              raise RuntimeError("Nao foi possivel abrir final_ai_director.mp4")
+
+          fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+          width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+          height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+          fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+          writer = cv2.VideoWriter(
+              out_silent,
+              fourcc,
+              fps,
+              (width, height)
+          )
+
+          # Bboxes foram detectados em 540x960.
+          sx = width / 540.0
+          sy = height / 960.0
+
+          frame_idx = 0
+
+          def rounded_mask(h, w, radius):
+              mask = np.zeros((h, w), dtype=np.uint8)
+              cv2.rectangle(
+                  mask,
+                  (radius, 0),
+                  (w-radius, h),
+                  255,
+                  -1
+              )
+              cv2.rectangle(
+                  mask,
+                  (0, radius),
+                  (w, h-radius),
+                  255,
+                  -1
+              )
+              cv2.circle(mask, (radius, radius), radius, 255, -1)
+              cv2.circle(mask, (w-radius-1, radius), radius, 255, -1)
+              cv2.circle(mask, (radius, h-radius-1), radius, 255, -1)
+              cv2.circle(mask, (w-radius-1, h-radius-1), radius, 255, -1)
+              return mask
+
+          while True:
+              ok, frame = cap.read()
+              if not ok:
+                  break
+
+              t = frame_idx / fps
+
+              active = [
+                  it for it in intervals
+                  if float(it["start"]) <= t <= float(it["end"])
+              ]
+
+              for it in active:
+                  x1 = max(0, int(it["x1"] * sx))
+                  y1 = max(0, int(it["y1"] * sy))
+                  x2 = min(width, int(it["x2"] * sx))
+                  y2 = min(height, int(it["y2"] * sy))
+
+                  if x2 <= x1 or y2 <= y1:
+                      continue
+
+                  roi = frame[y1:y2, x1:x2]
+                  if roi.size == 0:
+                      continue
+
+                  # Blur moderno: forte o suficiente para eliminar a legenda,
+                  # mas preservando a sensacao de imagem por tras.
+                  blur = cv2.GaussianBlur(
+                      roi,
+                      (0, 0),
+                      sigmaX=18,
+                      sigmaY=18
+                  )
+
+                  # Camada escura translúcida discreta.
+                  dark = np.zeros_like(blur)
+                  frosted = cv2.addWeighted(
+                      blur,
+                      0.82,
+                      dark,
+                      0.18,
+                      0
+                  )
+
+                  rh, rw = roi.shape[:2]
+                  radius = max(
+                      8,
+                      min(28, int(min(rw, rh) * 0.18))
+                  )
+
+                  mask = rounded_mask(
+                      rh,
+                      rw,
+                      radius
+                  )
+
+                  alpha = (
+                      mask.astype(np.float32) / 255.0
+                  )[..., None]
+
+                  blended = (
+                      frosted.astype(np.float32) * alpha
+                      + roi.astype(np.float32) * (1.0-alpha)
+                  ).astype(np.uint8)
+
+                  frame[y1:y2, x1:x2] = blended
+
+              writer.write(frame)
+              frame_idx += 1
+
+          cap.release()
+          writer.release()
+
+          if not Path(out_silent).exists():
+              raise RuntimeError("Blurred video nao criado.")
+
+          print(
+              f"Blur aplicado em {len(intervals)} intervalos."
+          )
+          PY
+
+          python3 /tmp/apply_smart_blur.py
+
+          test -s output/stage09/blurred_silent.mp4
+
+          # Normaliza codec para H.264 antes de receber as legendas.
+          ffmpeg -y \
+            -i output/stage09/blurred_silent.mp4 \
+            -an \
+            -c:v libx264 \
+            -preset veryfast \
+            -crf 20 \
+            -pix_fmt yuv420p \
+            -movflags +faststart \
+            output/stage09/blurred_master.mp4
+
+          test -s output/stage09/blurred_master.mp4
+
+      - name: Stage 09 - Transcrever Nova Narracao para Legendas
+        shell: bash
+        run: |
+          set -e
+
+          # Se o episodio for SEM_NARRACAO, cria legenda vazia
+          # e segue sem falhar.
+          if [ -f output/stage08/no_narration.flag ]; then
+            cat > output/stage09/new_captions.ass <<'ASS'
+          [Script Info]
+          ScriptType: v4.00+
+          PlayResX: 1080
+          PlayResY: 1920
+          ScaledBorderAndShadow: yes
+
+          [V4+ Styles]
+          Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
+          Style: Caption,DejaVu Sans,58,&H00FFFFFF,&H00FFFFFF,&H00303030,&H50000000,-1,0,0,0,100,100,0,0,1,3,1,2,90,90,300,1
+
+          [Events]
+          Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
+          ASS
+            touch output/stage09/no_new_captions.flag
+            exit 0
+          fi
+
+          cat > /tmp/build_new_captions.py <<'PY'
+          import math
+          import re
+          from pathlib import Path
+
+          from faster_whisper import WhisperModel
+
+          audio = "output/stage08/narration_master.m4a"
+          out_ass = Path("output/stage09/new_captions.ass")
+          out_txt = Path("output/stage09/new_captions.txt")
+
+          model = WhisperModel(
+              "small",
+              device="cpu",
+              compute_type="int8"
+          )
+
+          segments, info = model.transcribe(
+              audio,
+              language="pt",
+              beam_size=5,
+              vad_filter=True,
+              word_timestamps=True
+          )
+
+          words = []
+
+          for seg in segments:
+              if not seg.words:
+                  continue
+
+              for w in seg.words:
+                  txt = str(w.word or "").strip()
+                  if not txt:
+                      continue
+
+                  words.append({
+                      "start": float(w.start or seg.start),
+                      "end": float(w.end or seg.end),
+                      "word": txt
+                  })
+
+          def ass_time(sec):
+              sec = max(0.0, float(sec))
+              h = int(sec // 3600)
+              sec -= h*3600
+              m = int(sec // 60)
+              sec -= m*60
+              s = int(sec)
+              cs = int(round((sec-s)*100))
+
+              if cs >= 100:
+                  s += 1
+                  cs -= 100
+
+              return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
+
+          # Agrupa em blocos curtos, legiveis e dinamicos.
+          chunks = []
+          current = []
+
+          for item in words:
+              current.append(item)
+
+              text_now = " ".join(x["word"] for x in current)
+              duration = current[-1]["end"] - current[0]["start"]
+
+              punctuation = bool(
+                  re.search(r"[.!?…]$", current[-1]["word"])
+              )
+
+              too_many_words = len(current) >= 6
+              too_long = duration >= 2.5
+              too_many_chars = len(text_now) >= 34
+
+              if punctuation or too_many_words or too_long or too_many_chars:
+                  chunks.append(current)
+                  current = []
+
+          if current:
+              chunks.append(current)
+
+          header = """[Script Info]
+          ScriptType: v4.00+
+          PlayResX: 1080
+          PlayResY: 1920
+          ScaledBorderAndShadow: yes
+          WrapStyle: 2
+
+          [V4+ Styles]
+          Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
+          Style: Caption,DejaVu Sans,60,&H00FFFFFF,&H00FFFFFF,&H00202020,&H45000000,-1,0,0,0,100,100,0,0,1,4,1,2,100,100,315,1
+
+          [Events]
+          Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
+          """
+
+          lines = [header]
+          plain = []
+
+          for chunk in chunks:
+              start = chunk[0]["start"]
+              end = max(
+                  chunk[-1]["end"],
+                  start + 0.65
+              )
+
+              text = " ".join(
+                  x["word"] for x in chunk
+              ).strip()
+
+              # Escape ASS
+              text = text.replace("{", r"\{").replace("}", r"\}")
+
+              lines.append(
+                  "Dialogue: 0,"
+                  f"{ass_time(start)},"
+                  f"{ass_time(end)},"
+                  "Caption,,0,0,0,,"
+                  f"{{\\fad(70,70)}}{text}\n"
+              )
+
+              plain.append(
+                  f"{start:.2f}-{end:.2f}: {text}"
+              )
+
+          out_ass.write_text(
+              "".join(lines),
+              encoding="utf-8"
+          )
+
+          out_txt.write_text(
+              "\n".join(plain) + "\n",
+              encoding="utf-8"
+          )
+
+          print(
+              f"Blocos de nova legenda: {len(chunks)}"
+          )
+          PY
+
+          python3 /tmp/build_new_captions.py
+
+          test -s output/stage09/new_captions.ass
+
+      - name: Stage 09 - Renderizar Nova Legenda
+        shell: bash
+        run: |
+          set -e
+
+          VIDEO_DURATION=$(ffprobe \
+            -v error \
+            -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 \
+            output/stage08/final_ai_director.mp4)
+
+          if [ -f output/stage08/no_narration.flag ]; then
+            ffmpeg -y \
+              -i output/stage09/blurred_master.mp4 \
+              -i output/stage08/final_ai_director.mp4 \
+              -map 0:v:0 \
+              -map 1:a? \
+              -c:v copy \
+              -c:a copy \
+              -t "$VIDEO_DURATION" \
+              -movflags +faststart \
+              output/stage09/final_smart_subtitles.mp4
+          else
+            ffmpeg -y \
+              -i output/stage09/blurred_master.mp4 \
+              -i output/stage08/final_ai_director.mp4 \
+              -vf "ass=output/stage09/new_captions.ass" \
+              -map 0:v:0 \
+              -map 1:a:0 \
+              -c:v libx264 \
+              -preset veryfast \
+              -crf 19 \
+              -pix_fmt yuv420p \
+              -c:a copy \
+              -t "$VIDEO_DURATION" \
+              -movflags +faststart \
+              output/stage09/final_smart_subtitles.mp4
+          fi
+
+          test -s output/stage09/final_smart_subtitles.mp4
+
+      - name: Stage 09 - Validar Smart Subtitles
+        shell: bash
+        run: |
+          set -e
+
+          test -s output/stage09/final_smart_subtitles.mp4
+          test -s output/stage09/subtitle_detection.json
+          test -s output/stage09/new_captions.ass
+
+          WIDTH=$(ffprobe \
+            -v error \
+            -select_streams v:0 \
+            -show_entries stream=width \
+            -of csv=p=0 \
+            output/stage09/final_smart_subtitles.mp4)
+
+          HEIGHT=$(ffprobe \
+            -v error \
+            -select_streams v:0 \
+            -show_entries stream=height \
+            -of csv=p=0 \
+            output/stage09/final_smart_subtitles.mp4)
+
+          if [ "$WIDTH" != "1080" ] || [ "$HEIGHT" != "1920" ]; then
+            echo "ERRO: Stage 09 fora de 1080x1920."
+            exit 1
+          fi
+
+          echo "========================================"
+          echo "STAGE 09 SMART SUBTITLES VALIDADO"
+          echo "Deteccao de legenda antiga: OK"
+          echo "Blur dinamico: OK"
+          echo "Nova legenda sincronizada: OK"
+          echo "Gemini usado neste stage: NAO"
+          echo "========================================"
+
+      - name: Disponibilizar Stage 09 Smart Subtitles
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-09-smart-subtitles
+          path: |
+            output/stage09/final_smart_subtitles.mp4
+            output/stage09/subtitle_detection.json
+            output/stage09/subtitle_detection.txt
+            output/stage09/new_captions.ass
+            output/stage09/new_captions.txt
+            output/stage09/annotated/*.jpg
+          retention-days: 7
+          if-no-files-found: warn
+
+      # =========================================================
       # VALIDAR V15
       # =========================================================
 
@@ -2443,13 +3302,14 @@ jobs:
           fi
 
           echo "========================================"
-          echo "V15.7 IA + ACABAMENTO SEM IA VALIDADO"
+          echo "V15.8 SMART SUBTITLE BLUR VALIDADO"
           echo "Vision: OK"
           echo "Prompt opcional: OK"
           echo "Video sem narracao: suportado"
           echo "Diretor multimodal Gemini: suportado"
           echo "Plano manual sem IA: suportado"
           echo "Reuso de plano aprovado sem Gemini: suportado"
+          echo "Smart subtitle blur + nova legenda: suportado"
           echo "Freeze final: removido"
           echo "========================================"
 
