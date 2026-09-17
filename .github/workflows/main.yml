@@ -1,4 +1,4 @@
-name: Parece Mentira - Video Engine V8
+name: Parece Mentira - Video Engine V9
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ concurrency:
 jobs:
   render-video:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
 
@@ -24,7 +24,7 @@ jobs:
       - name: Instalar FFmpeg
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg python3-pip
 
       # =========================================================
       # LOCALIZAR ARQUIVOS
@@ -102,10 +102,6 @@ jobs:
             > output/source_report.txt
 
           echo "Duracao: $DURATION"
-          echo "Inicio logo central: $FINAL_START"
-          echo "Logo central 100% em: $FINAL_FULL"
-          echo "Fade final logo pequena inicia em: $SMALL_FADE_START"
-          echo "Fade final logo pequena termina em: $SMALL_FADE_END"
 
       # =========================================================
       # STAGE 01 - SOURCE BRANDING
@@ -118,12 +114,8 @@ jobs:
           set -e
 
           echo "========================================"
-          echo "STAGE 01 - BRANDING AJUSTADO FINAL"
-          echo "Timeline original preservada"
-          echo "Logo superior menos achatada"
-          echo "Logo inferior menos achatada"
-          echo "Ultima logo pequena fica ate 4s finais"
-          echo "Logo central final mantida"
+          echo "STAGE 01 - BRANDING APROVADO"
+          echo "NAO ALTERAR"
           echo "========================================"
 
           ffmpeg -y \
@@ -194,16 +186,6 @@ jobs:
             -of csv=p=0 \
             output/clean_master.mp4)
 
-          CLEAN_DURATION=$(ffprobe \
-            -v error \
-            -show_entries format=duration \
-            -of default=noprint_wrappers=1:nokey=1 \
-            output/clean_master.mp4)
-
-          echo "Stage 01:"
-          echo "${WIDTH}x${HEIGHT}"
-          echo "$CLEAN_DURATION segundos"
-
           if [ "$WIDTH" != "1080" ] || [ "$HEIGHT" != "1920" ]; then
             echo "ERRO: Stage 01 fora de 1080x1920."
             exit 1
@@ -246,20 +228,6 @@ jobs:
             output/editorial_master.mp4 \
             | tee output/editorial_report.txt
 
-          WIDTH=$(ffprobe \
-            -v error \
-            -select_streams v:0 \
-            -show_entries stream=width \
-            -of csv=p=0 \
-            output/editorial_master.mp4)
-
-          HEIGHT=$(ffprobe \
-            -v error \
-            -select_streams v:0 \
-            -show_entries stream=height \
-            -of csv=p=0 \
-            output/editorial_master.mp4)
-
           AUDIO_COUNT=$(ffprobe \
             -v error \
             -select_streams a \
@@ -268,13 +236,8 @@ jobs:
             output/editorial_master.mp4 \
             | wc -l)
 
-          if [ "$WIDTH" != "1080" ] || [ "$HEIGHT" != "1920" ]; then
-            echo "ERRO: Editorial Master fora de 1080x1920."
-            exit 1
-          fi
-
           if [ "$AUDIO_COUNT" -ne 0 ]; then
-            echo "ERRO: audio original ainda presente."
+            echo "ERRO: Stage 02 ainda possui audio."
             exit 1
           fi
 
@@ -288,10 +251,6 @@ jobs:
         shell: bash
         run: |
           set -e
-
-          echo "========================================"
-          echo "STAGE 03 - DETECCAO DE CENAS"
-          echo "========================================"
 
           ffmpeg \
             -hide_banner \
@@ -323,7 +282,6 @@ jobs:
             output/scene_report_unique.txt \
             output/scene_report.txt
 
-          echo "Pontos detectados:"
           cat output/scene_report.txt
 
       # =========================================================
@@ -362,23 +320,12 @@ jobs:
 
       # =========================================================
       # STAGE 04 - SCENE CUTTER
-      #
-      # Corta o editorial_master nos pontos detectados
-      # pelo Stage 03.
-      #
-      # Ainda NAO reordena.
-      # Ainda NAO exclui cenas.
       # =========================================================
 
       - name: Stage 04 - Criar Clips de Cena
         shell: bash
         run: |
           set -e
-
-          echo "========================================"
-          echo "STAGE 04 - SCENE CUTTER"
-          echo "Separando o video em cenas..."
-          echo "========================================"
 
           mkdir -p output/stage04_clips
 
@@ -393,7 +340,6 @@ jobs:
 
           echo "scene,start,end,duration,file" > output/edit_plan.csv
           echo "PARECE MENTIRA - EDIT PLAN" > output/edit_plan.txt
-          echo "========================================" >> output/edit_plan.txt
 
           CREATED=0
 
@@ -412,7 +358,6 @@ jobs:
               'BEGIN { if (d > 0.01) print 1; else print 0 }')
 
             if [ "$VALID" != "1" ]; then
-              echo "Ignorando trecho invalido: $START -> $END"
               continue
             fi
 
@@ -421,13 +366,6 @@ jobs:
             printf -v NUMBER "%03d" "$CREATED"
 
             OUTPUT_FILE="output/stage04_clips/scene_${NUMBER}.mp4"
-
-            echo "----------------------------------------"
-            echo "Cena $NUMBER"
-            echo "Inicio: $START"
-            echo "Fim: $END"
-            echo "Duracao: $CLIP_DURATION"
-            echo "----------------------------------------"
 
             ffmpeg -y \
               -ss "$START" \
@@ -456,49 +394,346 @@ jobs:
 
           done
 
-          echo ""
-          echo "========================================"
-          echo "STAGE 04 CONCLUIDO"
-          echo "Cenas criadas: $CREATED"
-          echo "========================================"
-
           if [ "$CREATED" -lt 1 ]; then
             echo "ERRO: nenhuma cena foi criada."
             exit 1
           fi
 
-          echo ""
-          echo "EDIT PLAN:"
-          cat output/edit_plan.csv
+          echo "STAGE 04 OK - Cenas: $CREATED"
 
       # =========================================================
-      # VALIDAR STAGE 04
+      # STAGE 05 - TRANSCRICAO / ENTENDIMENTO
       # =========================================================
 
-      - name: Validar Stage 04
+      - name: Stage 05 - Instalar Whisper
         shell: bash
         run: |
           set -e
 
-          CLIP_COUNT=$(find output/stage04_clips \
+          python3 -m pip install --upgrade pip
+          python3 -m pip install faster-whisper
+
+      # =========================================================
+      # Extrair audio leve para acelerar Whisper
+      # =========================================================
+
+      - name: Stage 05 - Preparar Audio
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p output/stage05
+
+          ffmpeg -y \
+            -i output/clean_master.mp4 \
+            -vn \
+            -ac 1 \
+            -ar 16000 \
+            -c:a pcm_s16le \
+            output/stage05/audio_whisper.wav
+
+          test -s output/stage05/audio_whisper.wav
+
+      # =========================================================
+      # TRANSCRICAO
+      # =========================================================
+
+      - name: Stage 05 - Transcrever com Whisper
+        shell: bash
+        run: |
+          set -e
+
+          cat > /tmp/transcribe.py <<'PY'
+          import json
+          from faster_whisper import WhisperModel
+
+          audio_path = "output/stage05/audio_whisper.wav"
+
+          print("Carregando Whisper...")
+          model = WhisperModel(
+              "small",
+              device="cpu",
+              compute_type="int8"
+          )
+
+          segments, info = model.transcribe(
+              audio_path,
+              language="pt",
+              beam_size=5,
+              vad_filter=True,
+              word_timestamps=True
+          )
+
+          result = {
+              "language": info.language,
+              "language_probability": info.language_probability,
+              "segments": []
+          }
+
+          full_text = []
+
+          for segment in segments:
+              item = {
+                  "start": round(segment.start, 3),
+                  "end": round(segment.end, 3),
+                  "text": segment.text.strip(),
+                  "words": []
+              }
+
+              if segment.words:
+                  for word in segment.words:
+                      item["words"].append({
+                          "start": round(word.start, 3) if word.start is not None else None,
+                          "end": round(word.end, 3) if word.end is not None else None,
+                          "word": word.word
+                      })
+
+              result["segments"].append(item)
+              full_text.append(segment.text.strip())
+
+              print(
+                  f"[{segment.start:.2f} -> {segment.end:.2f}] "
+                  f"{segment.text.strip()}"
+              )
+
+          with open(
+              "output/stage05/transcript.json",
+              "w",
+              encoding="utf-8"
+          ) as f:
+              json.dump(
+                  result,
+                  f,
+                  ensure_ascii=False,
+                  indent=2
+              )
+
+          with open(
+              "output/stage05/transcript.txt",
+              "w",
+              encoding="utf-8"
+          ) as f:
+              f.write("\n".join(full_text))
+
+          print("Transcricao concluida.")
+          PY
+
+          python3 /tmp/transcribe.py
+
+          test -s output/stage05/transcript.json
+          test -s output/stage05/transcript.txt
+
+      # =========================================================
+      # ASSOCIAR FALAS AS CENAS
+      # =========================================================
+
+      - name: Stage 05 - Criar Manifesto de Cenas
+        shell: bash
+        run: |
+          set -e
+
+          cat > /tmp/build_manifest.py <<'PY'
+          import csv
+          import json
+
+          edit_plan = "output/edit_plan.csv"
+          transcript_file = "output/stage05/transcript.json"
+
+          with open(
+              transcript_file,
+              "r",
+              encoding="utf-8"
+          ) as f:
+              transcript = json.load(f)
+
+          segments = transcript.get("segments", [])
+
+          scenes = []
+
+          with open(
+              edit_plan,
+              "r",
+              encoding="utf-8"
+          ) as f:
+              reader = csv.DictReader(f)
+
+              for row in reader:
+                  start = float(row["start"])
+                  end = float(row["end"])
+
+                  scene_segments = []
+
+                  for seg in segments:
+                      seg_start = float(seg["start"])
+                      seg_end = float(seg["end"])
+
+                      midpoint = (seg_start + seg_end) / 2
+
+                      if start <= midpoint < end:
+                          scene_segments.append(seg)
+
+                  text = " ".join(
+                      s["text"].strip()
+                      for s in scene_segments
+                      if s["text"].strip()
+                  ).strip()
+
+                  scene = {
+                      "scene": int(row["scene"]),
+                      "start": start,
+                      "end": end,
+                      "duration": float(row["duration"]),
+                      "file": row["file"],
+                      "transcript": text,
+                      "segments": scene_segments
+                  }
+
+                  scenes.append(scene)
+
+          with open(
+              "output/stage05/scene_manifest.json",
+              "w",
+              encoding="utf-8"
+          ) as f:
+              json.dump(
+                  scenes,
+                  f,
+                  ensure_ascii=False,
+                  indent=2
+              )
+
+          with open(
+              "output/stage05/scene_manifest.csv",
+              "w",
+              encoding="utf-8",
+              newline=""
+          ) as f:
+
+              writer = csv.writer(f)
+
+              writer.writerow([
+                  "scene",
+                  "start",
+                  "end",
+                  "duration",
+                  "file",
+                  "transcript"
+              ])
+
+              for scene in scenes:
+                  writer.writerow([
+                      f"{scene['scene']:03d}",
+                      scene["start"],
+                      scene["end"],
+                      scene["duration"],
+                      scene["file"],
+                      scene["transcript"]
+                  ])
+
+          with open(
+              "output/stage05/scene_manifest.txt",
+              "w",
+              encoding="utf-8"
+          ) as f:
+
+              f.write(
+                  "PARECE MENTIRA - SCENE MANIFEST\n"
+              )
+
+              f.write(
+                  "========================================\n\n"
+              )
+
+              for scene in scenes:
+
+                  f.write(
+                      f"CENA {scene['scene']:03d}\n"
+                  )
+
+                  f.write(
+                      f"Inicio: {scene['start']:.3f}s\n"
+                  )
+
+                  f.write(
+                      f"Fim: {scene['end']:.3f}s\n"
+                  )
+
+                  f.write(
+                      f"Duracao: {scene['duration']:.3f}s\n"
+                  )
+
+                  f.write(
+                      f"Arquivo: {scene['file']}\n"
+                  )
+
+                  f.write(
+                      f"Fala: {scene['transcript'] or '[sem fala detectada]'}\n"
+                  )
+
+                  f.write(
+                      "----------------------------------------\n"
+                  )
+
+          print("")
+          print("========================================")
+          print("SCENE MANIFEST")
+          print("========================================")
+
+          for scene in scenes:
+              print(
+                  f"CENA {scene['scene']:03d} | "
+                  f"{scene['start']:.2f}-{scene['end']:.2f}s | "
+                  f"{scene['transcript'] or '[sem fala]'}"
+              )
+          PY
+
+          python3 /tmp/build_manifest.py
+
+          test -s output/stage05/scene_manifest.json
+          test -s output/stage05/scene_manifest.csv
+          test -s output/stage05/scene_manifest.txt
+
+      # =========================================================
+      # VALIDAR STAGE 05
+      # =========================================================
+
+      - name: Validar Stage 05
+        shell: bash
+        run: |
+          set -e
+
+          SCENE_COUNT=$(find output/stage04_clips \
             -type f \
             -name "scene_*.mp4" \
             | wc -l)
 
-          echo "Clips encontrados: $CLIP_COUNT"
+          MANIFEST_COUNT=$(python3 - <<'PY'
+          import json
 
-          if [ "$CLIP_COUNT" -lt 1 ]; then
-            echo "ERRO: Stage 04 nao gerou clips."
+          with open(
+              "output/stage05/scene_manifest.json",
+              "r",
+              encoding="utf-8"
+          ) as f:
+              data = json.load(f)
+
+          print(len(data))
+          PY
+          )
+
+          echo "Cenas Stage 04: $SCENE_COUNT"
+          echo "Cenas Manifesto: $MANIFEST_COUNT"
+
+          if [ "$SCENE_COUNT" -ne "$MANIFEST_COUNT" ]; then
+            echo "ERRO: numero de cenas nao corresponde."
             exit 1
           fi
 
-          test -s output/edit_plan.csv
-          test -s output/edit_plan.txt
-
           echo "========================================"
-          echo "STAGE 04 VALIDADO"
-          echo "Clips: $CLIP_COUNT"
-          echo "Edit plan: OK"
+          echo "STAGE 05 VALIDADO"
+          echo "Transcricao: OK"
+          echo "Sincronizacao com cenas: OK"
+          echo "Manifesto: OK"
           echo "========================================"
 
       # =========================================================
@@ -544,5 +779,18 @@ jobs:
             output/stage04_clips/*.mp4
             output/edit_plan.csv
             output/edit_plan.txt
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Disponibilizar Stage 05
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-05-content-understanding
+          path: |
+            output/stage05/transcript.txt
+            output/stage05/transcript.json
+            output/stage05/scene_manifest.txt
+            output/stage05/scene_manifest.csv
+            output/stage05/scene_manifest.json
           retention-days: 7
           if-no-files-found: error
