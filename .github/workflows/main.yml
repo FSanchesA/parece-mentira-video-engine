@@ -1,4 +1,4 @@
-name: Parece Mentira - Video Engine V11
+name: Parece Mentira - Video Engine V12
 on:
   workflow_dispatch:
 
@@ -9,7 +9,7 @@ concurrency:
 jobs:
   render-video:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 55
     steps:
 
       # =========================================================
@@ -1212,6 +1212,307 @@ jobs:
           echo "========================================"
 
       # =========================================================
+      # STAGE 08 - NOVA NARRACAO + SINCRONIZACAO
+      #
+      # Objetivos:
+      # - criar um roteiro novo para a remontagem V11
+      # - gerar voz PT-BR com fallback em cascata
+      # - ajustar a locucao ao tempo do video
+      # - mixar a narracao no video remontado
+      #
+      # Ordem de TTS:
+      # 1) edge-tts
+      # 2) gTTS
+      # 3) espeak-ng
+      #
+      # Se um caminho falhar, o proximo e tentado sem perder
+      # nenhum dos stages anteriores.
+      # =========================================================
+
+      - name: Stage 08 - Instalar TTS
+        shell: bash
+        run: |
+          set -e
+
+          sudo apt-get update
+          sudo apt-get install -y espeak-ng
+
+          python3 -m pip install edge-tts gTTS
+
+      - name: Stage 08 - Criar Roteiro Final
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p output/stage08
+
+          cat > output/stage08/narration_script.txt <<'EOF'
+          Este pouso terminou bem. Mas poucos minutos antes, ninguém sabia se as 146 pessoas a bordo sairiam vivas.
+
+          Durante o voo 292 da JetBlue, o piloto percebeu que o trem de pouso dianteiro estava travado de lado. Se tocasse a pista daquele jeito, o avião poderia perder o controle.
+
+          Enquanto a tripulação mantinha a calma, os passageiros assistiam pela televisão do próprio avião à cobertura ao vivo do que poderia ser o acidente deles.
+
+          O Airbus ainda estava pesado demais. Então a tripulação permaneceu no ar, queimando combustível antes da tentativa final.
+
+          Depois de horas de tensão, o comandante Scott Burke iniciou a aproximação para Los Angeles. Ele manteve o nariz do avião suspenso o máximo possível, reduzindo a velocidade antes de deixar as rodas dianteiras tocarem a pista.
+
+          Os pneus se desgastaram, soltaram faíscas, mas o avião permaneceu sob controle.
+
+          Todos os 146 passageiros e tripulantes sobreviveram sem ferimentos graves.
+
+          Parece mentira. Mas aconteceu.
+          EOF
+
+          test -s output/stage08/narration_script.txt
+
+      - name: Stage 08 - Gerar Narracao com Fallback
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p output/stage08
+          rm -f output/stage08/narration_raw.mp3
+          rm -f output/stage08/tts_engine.txt
+
+          TEXT=$(cat output/stage08/narration_script.txt)
+
+          echo "========================================"
+          echo "TENTATIVA 1 - EDGE TTS"
+          echo "========================================"
+
+          if edge-tts \
+            --voice pt-BR-AntonioNeural \
+            --rate="-4%" \
+            --text "$TEXT" \
+            --write-media output/stage08/narration_raw.mp3; then
+
+            if [ -s output/stage08/narration_raw.mp3 ]; then
+              echo "edge-tts" > output/stage08/tts_engine.txt
+            fi
+          fi
+
+          if [ ! -s output/stage08/narration_raw.mp3 ]; then
+            echo "========================================"
+            echo "TENTATIVA 2 - GTTS"
+            echo "========================================"
+
+            python3 - <<'PY'
+          from gtts import gTTS
+          from pathlib import Path
+
+          text = Path(
+              "output/stage08/narration_script.txt"
+          ).read_text(encoding="utf-8")
+
+          try:
+              tts = gTTS(
+                  text=text,
+                  lang="pt",
+                  tld="com.br",
+                  slow=False
+              )
+              tts.save(
+                  "output/stage08/narration_raw.mp3"
+              )
+          except Exception as exc:
+              print("gTTS falhou:", exc)
+          PY
+
+            if [ -s output/stage08/narration_raw.mp3 ]; then
+              echo "gTTS" > output/stage08/tts_engine.txt
+            fi
+          fi
+
+          if [ ! -s output/stage08/narration_raw.mp3 ]; then
+            echo "========================================"
+            echo "TENTATIVA 3 - ESPEAK-NG"
+            echo "========================================"
+
+            espeak-ng \
+              -v pt-br \
+              -s 158 \
+              -f output/stage08/narration_script.txt \
+              -w output/stage08/narration_espeak.wav
+
+            ffmpeg -y \
+              -i output/stage08/narration_espeak.wav \
+              -c:a libmp3lame \
+              -b:a 160k \
+              output/stage08/narration_raw.mp3
+
+            if [ -s output/stage08/narration_raw.mp3 ]; then
+              echo "espeak-ng" > output/stage08/tts_engine.txt
+            fi
+          fi
+
+          if [ ! -s output/stage08/narration_raw.mp3 ]; then
+            echo "ERRO: nenhum motor TTS conseguiu gerar a narracao."
+            exit 1
+          fi
+
+          echo "Motor utilizado:"
+          cat output/stage08/tts_engine.txt
+
+      # =========================================================
+      # AJUSTAR A LOCUCAO AO VIDEO
+      #
+      # A voz nao e cortada.
+      # Se estiver longa, acelera de forma moderada.
+      # Se estiver curta, preserva pausas naturais.
+      # =========================================================
+
+      - name: Stage 08 - Ajustar Duracao da Narracao
+        shell: bash
+        run: |
+          set -e
+
+          VIDEO_DURATION=$(ffprobe \
+            -v error \
+            -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 \
+            output/stage07/remontagem_com_mapa.mp4)
+
+          AUDIO_DURATION=$(ffprobe \
+            -v error \
+            -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 \
+            output/stage08/narration_raw.mp3)
+
+          # Reserva 1.2s no inicio e 1.5s no fim.
+          TARGET=$(awk -v d="$VIDEO_DURATION" \
+            'BEGIN { t=d-2.7; if (t<1) t=d; printf "%.3f", t }')
+
+          RATIO=$(awk \
+            -v a="$AUDIO_DURATION" \
+            -v t="$TARGET" \
+            'BEGIN { printf "%.6f", a/t }')
+
+          echo "Video: $VIDEO_DURATION"
+          echo "Narracao original: $AUDIO_DURATION"
+          echo "Janela alvo: $TARGET"
+          echo "Razao: $RATIO"
+
+          # atempo > 1 acelera.
+          # Mantemos dentro de uma faixa natural.
+          TEMPO=$(awk -v r="$RATIO" '
+            BEGIN {
+              if (r < 0.90) r = 0.90;
+              if (r > 1.18) r = 1.18;
+              printf "%.6f", r
+            }')
+
+          echo "atempo aplicado: $TEMPO"
+
+          ffmpeg -y \
+            -i output/stage08/narration_raw.mp3 \
+            -filter:a "atempo=${TEMPO},volume=1.05" \
+            -c:a aac \
+            -b:a 160k \
+            output/stage08/narration_fitted.m4a
+
+          test -s output/stage08/narration_fitted.m4a
+
+      # =========================================================
+      # CRIAR AUDIO COM RESPIRO INICIAL
+      # =========================================================
+
+      - name: Stage 08 - Posicionar Narracao
+        shell: bash
+        run: |
+          set -e
+
+          ffmpeg -y \
+            -i output/stage08/narration_fitted.m4a \
+            -filter_complex \
+            "[0:a]adelay=1200|1200,apad=pad_dur=2.0[a]" \
+            -map "[a]" \
+            -c:a aac \
+            -b:a 160k \
+            output/stage08/narration_timeline.m4a
+
+          test -s output/stage08/narration_timeline.m4a
+
+      # =========================================================
+      # MUX FINAL DA NARRACAO
+      # =========================================================
+
+      - name: Stage 08 - Criar Video Narrado
+        shell: bash
+        run: |
+          set -e
+
+          ffmpeg -y \
+            -i output/stage07/remontagem_com_mapa.mp4 \
+            -i output/stage08/narration_timeline.m4a \
+            -map 0:v:0 \
+            -map 1:a:0 \
+            -c:v copy \
+            -c:a aac \
+            -b:a 160k \
+            -shortest \
+            -movflags +faststart \
+            output/stage08/remontagem_narrada.mp4
+
+          test -s output/stage08/remontagem_narrada.mp4
+
+      # =========================================================
+      # VALIDAR STAGE 08
+      # =========================================================
+
+      - name: Validar Stage 08
+        shell: bash
+        run: |
+          set -e
+
+          WIDTH=$(ffprobe \
+            -v error \
+            -select_streams v:0 \
+            -show_entries stream=width \
+            -of csv=p=0 \
+            output/stage08/remontagem_narrada.mp4)
+
+          HEIGHT=$(ffprobe \
+            -v error \
+            -select_streams v:0 \
+            -show_entries stream=height \
+            -of csv=p=0 \
+            output/stage08/remontagem_narrada.mp4)
+
+          AUDIO_COUNT=$(ffprobe \
+            -v error \
+            -select_streams a \
+            -show_entries stream=index \
+            -of csv=p=0 \
+            output/stage08/remontagem_narrada.mp4 \
+            | wc -l)
+
+          FINAL_DURATION=$(ffprobe \
+            -v error \
+            -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 \
+            output/stage08/remontagem_narrada.mp4)
+
+          if [ "$WIDTH" != "1080" ] || [ "$HEIGHT" != "1920" ]; then
+            echo "ERRO: Stage 08 fora de 1080x1920."
+            exit 1
+          fi
+
+          if [ "$AUDIO_COUNT" -lt 1 ]; then
+            echo "ERRO: Stage 08 sem narracao."
+            exit 1
+          fi
+
+          echo "========================================"
+          echo "STAGE 08 VALIDADO"
+          echo "Narracao: OK"
+          echo "Resolucao: 1080x1920"
+          echo "Duracao: $FINAL_DURATION"
+          echo "Motor TTS:"
+          cat output/stage08/tts_engine.txt
+          echo "========================================"
+
+      # =========================================================
       # ARTIFACTS
       # =========================================================
 
@@ -1289,5 +1590,19 @@ jobs:
             output/stage07/map_insert.mp4
             output/stage07/final_concat.txt
             output/stage07/remontagem_com_mapa.mp4
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Disponibilizar Stage 08
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-08-narrated-video
+          path: |
+            output/stage08/narration_script.txt
+            output/stage08/tts_engine.txt
+            output/stage08/narration_raw.mp3
+            output/stage08/narration_fitted.m4a
+            output/stage08/narration_timeline.m4a
+            output/stage08/remontagem_narrada.mp4
           retention-days: 7
           if-no-files-found: error
