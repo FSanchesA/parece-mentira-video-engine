@@ -1,4 +1,4 @@
-name: Parece Mentira - Video Engine V5
+name: Parece Mentira - Video Engine V6
 
 on:
   workflow_dispatch:
@@ -82,8 +82,8 @@ jobs:
             exit 1
           fi
 
-          FINAL_START=$(awk -v d="$DURATION" 'BEGIN { printf "%.3f", d-4.0 }')
-          FINAL_FULL=$(awk -v d="$DURATION" 'BEGIN { printf "%.3f", d-3.0 }')
+          FINAL_START=$(awk -v d="$DURATION" 'BEGIN { printf "%.3f", d-5.0 }')
+          FINAL_FULL=$(awk -v d="$DURATION" 'BEGIN { printf "%.3f", d-4.0 }')
 
           echo "DURATION=$DURATION" >> "$GITHUB_ENV"
           echo "FINAL_START=$FINAL_START" >> "$GITHUB_ENV"
@@ -98,29 +98,24 @@ jobs:
             > output/source_report.txt
 
           echo "Duracao: $DURATION"
-          echo "Inicio da transicao final: $FINAL_START"
-          echo "Logo central 100% ate: $FINAL_FULL"
+          echo "Inicio final: $FINAL_START"
+          echo "Logo central 100% em: $FINAL_FULL"
 
       # =========================================================
       # STAGE 01 - SOURCE BRANDING
-      #
-      # REGRAS:
-      # - manter timing de alternancia
-      # - ajustar somente topo
-      # - no final a logo central sobe e aparece
-      # - logos de canto somem e nao voltam mais
       # =========================================================
 
-      - name: Stage 01 - Branding Final Ajustado
+      - name: Stage 01 - Branding Ajustado
         shell: bash
         run: |
           set -e
 
           echo "========================================"
-          echo "STAGE 01 - BRANDING FINAL AJUSTADO"
-          echo "Timing preservado"
-          echo "Ajuste da logo superior"
-          echo "Entrada da logo central do 4o ao 3o ultimo segundo"
+          echo "STAGE 01 - BRANDING AJUSTADO"
+          echo "Timeline original preservada"
+          echo "Logo superior mais baixa"
+          echo "Logo inferior mais alta"
+          echo "Ultimos 5s com logo central"
           echo "========================================"
 
           ffmpeg -y \
@@ -130,7 +125,7 @@ jobs:
             -filter_complex "\
             [0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1[base];\
             \
-            [1:v]scale=280:138,format=rgba,split=10[l1][l2][l3][l4][l5][l6][l7][l8][l9][l10];\
+            [1:v]scale=270:150,format=rgba,split=9[l1][l2][l3][l4][l5][l6][l7][l8][l9];\
             \
             [l1]fade=t=out:st=8.95:d=0.55:alpha=1[top0];\
             [l2]fade=t=in:st=8.60:d=0.40:alpha=1,fade=t=out:st=17.95:d=0.55:alpha=1[bottom0];\
@@ -140,22 +135,20 @@ jobs:
             [l6]fade=t=in:st=44.60:d=0.40:alpha=1,fade=t=out:st=53.95:d=0.55:alpha=1[bottom2];\
             [l7]fade=t=in:st=53.60:d=0.40:alpha=1,fade=t=out:st=62.95:d=0.55:alpha=1[top3];\
             [l8]fade=t=in:st=62.60:d=0.40:alpha=1,fade=t=out:st=71.95:d=0.55:alpha=1[bottom3];\
-            [l9]fade=t=in:st=71.60:d=0.40:alpha=1,fade=t=out:st=${FINAL_FULL}:d=0.55:alpha=1[top4];\
-            [l10]fade=t=in:st=80.60:d=0.40:alpha=1,fade=t=out:st=${FINAL_START}:d=1.00:alpha=1[bottom4];\
+            [l9]fade=t=in:st=71.60:d=0.40:alpha=1,fade=t=out:st=${FINAL_START}:d=1.00:alpha=1[top4];\
             \
-            [base][top0]overlay=x=W-w-10:y=355:enable='between(t,0,9.5)'[v1];\
-            [v1][bottom0]overlay=x=20:y=H-h-605:enable='between(t,8.6,18.5)'[v2];\
-            [v2][top1]overlay=x=W-w-10:y=355:enable='between(t,17.6,27.5)'[v3];\
-            [v3][bottom1]overlay=x=20:y=H-h-605:enable='between(t,26.6,36.5)'[v4];\
-            [v4][top2]overlay=x=W-w-10:y=355:enable='between(t,35.6,45.5)'[v5];\
-            [v5][bottom2]overlay=x=20:y=H-h-605:enable='between(t,44.6,54.5)'[v6];\
-            [v6][top3]overlay=x=W-w-10:y=355:enable='between(t,53.6,63.5)'[v7];\
-            [v7][bottom3]overlay=x=20:y=H-h-605:enable='between(t,62.6,72.5)'[v8];\
-            [v8][top4]overlay=x=W-w-10:y=355:enable='between(t,71.6,${FINAL_FULL})'[v9];\
-            [v9][bottom4]overlay=x=20:y=H-h-605:enable='between(t,80.6,${FINAL_FULL})'[corner_branding];\
+            [base][top0]overlay=x=W-w-18:y=388:enable='between(t,0,9.5)'[v1];\
+            [v1][bottom0]overlay=x=18:y=H-h-625:enable='between(t,8.6,18.5)'[v2];\
+            [v2][top1]overlay=x=W-w-18:y=388:enable='between(t,17.6,27.5)'[v3];\
+            [v3][bottom1]overlay=x=18:y=H-h-625:enable='between(t,26.6,36.5)'[v4];\
+            [v4][top2]overlay=x=W-w-18:y=388:enable='between(t,35.6,45.5)'[v5];\
+            [v5][bottom2]overlay=x=18:y=H-h-625:enable='between(t,44.6,54.5)'[v6];\
+            [v6][top3]overlay=x=W-w-18:y=388:enable='between(t,53.6,63.5)'[v7];\
+            [v7][bottom3]overlay=x=18:y=H-h-625:enable='between(t,62.6,72.5)'[v8];\
+            [v8][top4]overlay=x=W-w-18:y=388:enable='between(t,71.6,${FINAL_FULL})'[corners];\
             \
             [2:v]scale=540:540,format=rgba,fade=t=in:st=${FINAL_START}:d=1.0:alpha=1[final_logo];\
-            [corner_branding][final_logo]overlay=x=(W-w)/2:y='if(lt(t,${FINAL_FULL}), H-h+((t-${FINAL_START})/1.0)*(((H-h)/2)-(H-h)), (H-h)/2 )':enable='gte(t,${FINAL_START})'[clean]" \
+            [corners][final_logo]overlay=x=(W-w)/2:y=(H-h)/2:enable='gte(t,${FINAL_START})'[clean]" \
             -map "[clean]" \
             -map 0:a? \
             -t "$DURATION" \
