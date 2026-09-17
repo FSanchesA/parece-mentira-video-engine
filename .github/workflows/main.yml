@@ -1,4 +1,4 @@
-name: Parece Mentira - Video Engine V15.16 Trilha Adaptativa por Estilo
+name: Parece Mentira - Video Engine V15.18 Acabamento Visual
 on:
   workflow_dispatch:
     inputs:
@@ -26,22 +26,6 @@ on:
           - NOVA
           - SEM_NARRACAO
           - PLANO_MANUAL
-      estilo_trilha:
-        description: "Estilo da trilha"
-        required: true
-        type: choice
-        default: "AUTO"
-        options:
-          - AUTO
-          - SUSPENSE
-          - CURIOSIDADE
-          - TERROR
-          - PANICO
-          - DRAMATICO
-          - AMOR
-          - INSPIRADOR
-          - TECNOLOGICO
-          - NEUTRO
 concurrency:
   group: parece-mentira-video-engine
   cancel-in-progress: true
@@ -1088,27 +1072,11 @@ jobs:
               - onde ela pode entrar na timeline
               - qual trecho da nova narracao pode aparecer sobre ela
 
-          26. ESTILO DE TRILHA.
-              Classifique o clima predominante do episodio em APENAS UMA destas categorias:
-              - SUSPENSE: tensao crescente, risco, expectativa, incidente, sobrevivencia
-              - CURIOSIDADE: descoberta, fato curioso, ciencia, explicacao, misterio leve
-              - TERROR: medo sombrio, macabro, sobrenatural ou atmosfera pesada
-              - PANICO: urgencia extrema, perigo imediato, corrida contra o tempo
-              - DRAMATICO: emocao forte, perda, superacao dificil, grande impacto humano
-              - AMOR: romance, afeto, reencontro, vinculo emocional
-              - INSPIRADOR: conquista, superacao, resiliencia, final positivo
-              - TECNOLOGICO: ciencia aplicada, engenharia, espaco, inovacao, maquinas
-              - NEUTRO: quando nenhuma categoria acima dominar claramente
-
-              Para o canal PARECE MENTIRA, se houver mistura entre curiosidade e risco,
-              prefira SUSPENSE. Se houver ciencia/explicacao sem risco forte, prefira CURIOSIDADE.
-
           RETORNE SOMENTE JSON VALIDO neste formato:
 
           {{
             "story_summary": "resumo curto",
             "mode_used": "AUTO|ORIGINAL|NOVA|SEM_NARRACAO",
-            "soundtrack_mood": "SUSPENSE|CURIOSIDADE|TERROR|PANICO|DRAMATICO|AMOR|INSPIRADOR|TECNOLOGICO|NEUTRO",
             "research_notes": [
               {{
                 "fact": "fato utilizado",
@@ -1634,8 +1602,6 @@ jobs:
           if "story_summary" not in plan:
               plan["story_summary"] = ""
 
-          if "soundtrack_mood" not in plan:
-              plan["soundtrack_mood"] = "AUTO"
 
           if "research_notes" not in plan:
               plan["research_notes"] = []
@@ -1817,8 +1783,6 @@ jobs:
               if kind == "increment":
                   item["scene"] = None
 
-          if "soundtrack_mood" not in plan:
-              plan["soundtrack_mood"] = "AUTO"
 
           plan_path.write_text(
               json.dumps(
@@ -2493,701 +2457,196 @@ jobs:
           test -s output/stage08/final_ai_director.mp4
 
       # =========================================================
-      # STAGE 09 - TRILHA ORIGINAL + DUCKING
+      # STAGE 09 - ACABAMENTO VISUAL CONSERVADOR
       #
       # OBJETIVO:
-      # - adicionar trilha MUITO baixa
-      # - sem usar musica externa
-      # - gerar cama sonora procedural original no proprio workflow
-      # - reduzir ainda mais a trilha quando houver locucao
-      # - preservar integralmente imagem, legenda original e narracao
+      # - melhorar nitidez percebida e acabamento
+      # - dar leve ganho de contraste e saturacao
+      # - manter narracao EXATAMENTE como saiu do Stage 08
+      # - manter legenda original queimada no video
+      # - manter duracao, cortes, ordem e sincronismo
       #
-      # Vantagem:
-      # - nao depende de biblioteca musical de terceiros
-      # - evita inserir faixa comercial/licenciada no video
-      # - nao usa Gemini
+      # IMPORTANTE:
+      # - NAO altera velocidade
+      # - NAO cria transicoes que encurtem a timeline
+      # - NAO aplica zoom/crop global que possa cortar legenda
+      # - NAO mexe no audio
       # =========================================================
 
-      - name: Stage 09 - Escolher Estilo e Gerar Trilha Adaptativa
+      - name: Stage 09 - Aplicar Acabamento Visual
         shell: bash
-        env:
-          TRACK_STYLE_INPUT: ${{ inputs.estilo_trilha }}
         run: |
           set -e
 
           mkdir -p output/stage09
 
+          INPUT="output/stage08/final_ai_director.mp4"
+          OUTPUT="output/stage09/final_visual_polish.mp4"
+
+          test -s "$INPUT"
+
           VIDEO_DURATION=$(ffprobe \
             -v error \
             -show_entries format=duration \
             -of default=noprint_wrappers=1:nokey=1 \
-            output/stage08/final_ai_director.mp4)
+            "$INPUT")
 
           if [ -z "$VIDEO_DURATION" ]; then
-            echo "ERRO: nao foi possivel determinar duracao do Stage 08."
+            echo "ERRO: duracao do Stage 08 nao identificada."
             exit 1
           fi
-
-          # -----------------------------------------------------
-          # ESCOLHA DE ESTILO
-          #
-          # 1. Se o usuario escolher um estilo, ele prevalece.
-          # 2. Se escolher AUTO:
-          #    - usa soundtrack_mood do AI Director quando existir
-          #    - senao usa heuristica local sobre resumo + narracao
-          #
-          # Assim ACABAMENTO_SEM_IA continua funcionando sem Gemini.
-          # -----------------------------------------------------
-
-          python3 - <<'PY'
-          import hashlib
-          import json
-          import os
-          import re
-          import subprocess
-          import wave
-          import math
-          import struct
-          from pathlib import Path
-
-          plan = json.loads(
-              Path("output/stage06_ai/director_plan.json")
-              .read_text(encoding="utf-8")
-          )
-
-          requested = os.getenv(
-              "TRACK_STYLE_INPUT",
-              "AUTO"
-          ).strip().upper()
-
-          valid = {
-              "AUTO",
-              "SUSPENSE",
-              "CURIOSIDADE",
-              "TERROR",
-              "PANICO",
-              "DRAMATICO",
-              "AMOR",
-              "INSPIRADOR",
-              "TECNOLOGICO",
-              "NEUTRO",
-          }
-
-          if requested not in valid:
-              requested = "AUTO"
-
-          ai_style = str(
-              plan.get("soundtrack_mood", "AUTO")
-          ).strip().upper()
-
-          if ai_style not in valid:
-              ai_style = "AUTO"
-
-          summary = str(
-              plan.get("story_summary", "")
-          )
-
-          narration = " ".join(
-              str(x.get("narration", ""))
-              for x in plan.get("timeline", [])
-          )
-
-          corpus = f"{summary} {narration}".lower()
-
-          def local_classify(text):
-              rules = [
-                  (
-                      "PANICO",
-                      [
-                          "pânico", "panico", "desespero", "urgência",
-                          "urgencia", "explosão", "explosao", "correndo",
-                          "últimos segundos", "ultimos segundos",
-                          "risco imediato", "colisão", "colisao"
-                      ],
-                  ),
-                  (
-                      "TERROR",
-                      [
-                          "assombração", "assombr", "sobrenatural",
-                          "cadáver", "cadaver", "macabro", "demônio",
-                          "demonio", "fantasma", "amaldiço", "terror"
-                      ],
-                  ),
-                  (
-                      "AMOR",
-                      [
-                          "amor", "romance", "casal", "beijo",
-                          "apaixon", "reencontro", "casamento"
-                      ],
-                  ),
-                  (
-                      "INSPIRADOR",
-                      [
-                          "superação", "superacao", "conquista",
-                          "venceu", "sobreviveu", "resiliência",
-                          "resiliencia", "recorde", "salvou"
-                      ],
-                  ),
-                  (
-                      "TECNOLOGICO",
-                      [
-                          "engenharia", "tecnologia", "robô", "robo",
-                          "satélite", "satelite", "nasa", "foguete",
-                          "avião", "aviao", "aeronave", "espaço",
-                          "espaco", "máquina", "maquina"
-                      ],
-                  ),
-                  (
-                      "SUSPENSE",
-                      [
-                          "risco", "perigo", "incidente", "mistério",
-                          "misterio", "falha", "preso", "sobreviv",
-                          "desapareceu", "acidente", "tensão", "tensao",
-                          "pouso", "defeito", "ameaça", "ameaca"
-                      ],
-                  ),
-                  (
-                      "DRAMATICO",
-                      [
-                          "tragédia", "tragedia", "morreu", "perdeu",
-                          "choro", "emocion", "família", "familia"
-                      ],
-                  ),
-                  (
-                      "CURIOSIDADE",
-                      [
-                          "descoberta", "curioso", "curiosidade",
-                          "cientista", "oceano", "fenômeno", "fenomeno",
-                          "história", "historia", "explica", "segredo"
-                      ],
-                  ),
-              ]
-
-              scores = {}
-
-              for style, words in rules:
-                  score = 0
-                  for word in words:
-                      score += text.count(word)
-                  scores[style] = score
-
-              # Canal tende a curiosidade/suspense:
-              # se houver risco real, suspense ganha.
-              if scores.get("SUSPENSE", 0) > 0:
-                  scores["SUSPENSE"] += 1
-
-              best = max(
-                  scores.items(),
-                  key=lambda x: x[1]
-              )
-
-              if best[1] <= 0:
-                  return "CURIOSIDADE"
-
-              return best[0]
-
-          if requested != "AUTO":
-              style = requested
-              source = "SELECIONADO_PELO_USUARIO"
-          elif ai_style not in ("", "AUTO"):
-              style = ai_style
-              source = "AI_DIRECTOR"
-          else:
-              style = local_classify(corpus)
-              source = "CLASSIFICADOR_LOCAL"
-
-          Path(
-              "output/stage09/track_style.txt"
-          ).write_text(
-              f"{style}\n{source}\n",
-              encoding="utf-8"
-          )
-
-          # -----------------------------------------------------
-          # VARIACAO POR EPISODIO
-          #
-          # Mesmo estilo NAO gera sempre a mesma trilha.
-          # O hash do episodio escolhe tempo, progressao,
-          # oitava e padrao de arpejo de forma deterministica.
-          # -----------------------------------------------------
-
-          seed_text = (
-              style
-              + "|"
-              + summary
-              + "|"
-              + narration
-          )
-
-          seed = int(
-              hashlib.sha256(
-                  seed_text.encode("utf-8")
-              ).hexdigest()[:12],
-              16
-          )
-
-          video = "output/stage08/final_ai_director.mp4"
-          out = "output/stage09/original_bed.wav"
-
-          duration = float(
-              subprocess.check_output([
-                  "ffprobe",
-                  "-v", "error",
-                  "-show_entries", "format=duration",
-                  "-of", "default=noprint_wrappers=1:nokey=1",
-                  video
-              ], text=True).strip()
-          )
-
-          sr = 48000
-          total = int(duration * sr)
-
-          # Configuracoes tonais por clima.
-          configs = {
-              "SUSPENSE": {
-                  "bpm": [82, 88, 94],
-                  "chords": [
-                      [[146.83,174.61,220.00,261.63],
-                       [130.81,164.81,196.00,246.94],
-                       [116.54,146.83,174.61,220.00],
-                       [130.81,174.61,196.00,261.63]],
-                      [[138.59,174.61,207.65,261.63],
-                       [123.47,155.56,185.00,233.08],
-                       [116.54,146.83,174.61,207.65],
-                       [130.81,164.81,196.00,246.94]]
-                  ],
-                  "pluck": 0.085,
-                  "pad": 0.026,
-                  "octave": 1.0,
-              },
-              "CURIOSIDADE": {
-                  "bpm": [92, 98, 104],
-                  "chords": [
-                      [[146.83,220.00,261.63,349.23],
-                       [116.54,174.61,233.08,293.66],
-                       [130.81,196.00,261.63,329.63],
-                       [130.81,196.00,261.63,392.00]],
-                      [[164.81,246.94,329.63,392.00],
-                       [130.81,196.00,261.63,329.63],
-                       [146.83,220.00,293.66,349.23],
-                       [123.47,185.00,246.94,311.13]]
-                  ],
-                  "pluck": 0.090,
-                  "pad": 0.025,
-                  "octave": 1.0,
-              },
-              "TERROR": {
-                  "bpm": [58, 64, 70],
-                  "chords": [
-                      [[110.00,116.54,164.81,220.00],
-                       [103.83,110.00,155.56,207.65],
-                       [98.00,103.83,146.83,196.00],
-                       [92.50,98.00,138.59,185.00]]
-                  ],
-                  "pluck": 0.060,
-                  "pad": 0.040,
-                  "octave": 0.85,
-              },
-              "PANICO": {
-                  "bpm": [118, 126, 134],
-                  "chords": [
-                      [[146.83,174.61,220.00,261.63],
-                       [138.59,164.81,207.65,246.94],
-                       [130.81,155.56,196.00,233.08],
-                       [123.47,146.83,185.00,220.00]]
-                  ],
-                  "pluck": 0.100,
-                  "pad": 0.022,
-                  "octave": 1.15,
-              },
-              "DRAMATICO": {
-                  "bpm": [68, 74, 80],
-                  "chords": [
-                      [[146.83,220.00,261.63,349.23],
-                       [116.54,174.61,233.08,293.66],
-                       [130.81,196.00,261.63,329.63],
-                       [98.00,146.83,196.00,246.94]]
-                  ],
-                  "pluck": 0.070,
-                  "pad": 0.040,
-                  "octave": 0.95,
-              },
-              "AMOR": {
-                  "bpm": [72, 78, 84],
-                  "chords": [
-                      [[130.81,164.81,196.00,261.63],
-                       [110.00,164.81,220.00,261.63],
-                       [146.83,174.61,220.00,293.66],
-                       [98.00,130.81,196.00,261.63]]
-                  ],
-                  "pluck": 0.065,
-                  "pad": 0.045,
-                  "octave": 1.0,
-              },
-              "INSPIRADOR": {
-                  "bpm": [88, 96, 104],
-                  "chords": [
-                      [[130.81,164.81,196.00,261.63],
-                       [146.83,185.00,220.00,293.66],
-                       [164.81,196.00,246.94,329.63],
-                       [130.81,196.00,261.63,329.63]]
-                  ],
-                  "pluck": 0.085,
-                  "pad": 0.040,
-                  "octave": 1.05,
-              },
-              "TECNOLOGICO": {
-                  "bpm": [100, 108, 116],
-                  "chords": [
-                      [[146.83,220.00,293.66,440.00],
-                       [164.81,246.94,329.63,493.88],
-                       [130.81,196.00,261.63,392.00],
-                       [123.47,185.00,246.94,369.99]]
-                  ],
-                  "pluck": 0.080,
-                  "pad": 0.028,
-                  "octave": 1.15,
-              },
-              "NEUTRO": {
-                  "bpm": [82, 90, 98],
-                  "chords": [
-                      [[130.81,164.81,196.00,261.63],
-                       [146.83,174.61,220.00,293.66],
-                       [130.81,196.00,261.63,329.63],
-                       [98.00,146.83,196.00,246.94]]
-                  ],
-                  "pluck": 0.070,
-                  "pad": 0.028,
-                  "octave": 1.0,
-              },
-          }
-
-          cfg = configs.get(
-              style,
-              configs["CURIOSIDADE"]
-          )
-
-          bpm = cfg["bpm"][
-              seed % len(cfg["bpm"])
-          ]
-
-          chord_set = cfg["chords"][
-              (seed // 7) % len(cfg["chords"])
-          ]
-
-          beat = 60.0 / bpm
-          chord_len = beat * 8.0
-
-          # 4 padroes para evitar a mesma musica.
-          arp_patterns = [
-              [0, 1, 2, 1, 3, 2, 1, 2],
-              [0, 2, 1, 3, 2, 1, 3, 1],
-              [0, 1, 3, 2, 1, 2, 3, 2],
-              [0, 2, 3, 1, 2, 1, 3, 2],
-          ]
-
-          pattern = arp_patterns[
-              (seed // 13) % len(arp_patterns)
-          ]
-
-          octave_factor = cfg["octave"] * (
-              1.0 if ((seed // 17) % 2 == 0) else 1.06
-          )
-
-          def clamp(x):
-              return max(-1.0, min(1.0, x))
-
-          def pluck_env(local_t, length):
-              if local_t < 0 or local_t > length:
-                  return 0.0
-              attack = min(local_t / 0.028, 1.0)
-              decay = math.exp(
-                  -3.5 * local_t / max(length, 0.01)
-              )
-              return attack * decay
-
-          def pad_env(local_t, length):
-              if local_t < 0 or local_t > length:
-                  return 0.0
-              fade = min(local_t / 0.40, 1.0)
-              tail = min(
-                  (length - local_t) / 0.55,
-                  1.0
-              )
-              return max(
-                  0.0,
-                  min(fade, tail, 1.0)
-              )
-
-          with wave.open(out, "wb") as wf:
-              wf.setnchannels(2)
-              wf.setsampwidth(2)
-              wf.setframerate(sr)
-
-              frames = bytearray()
-
-              for i in range(total):
-                  t = i / sr
-
-                  chord_index = int(
-                      t // chord_len
-                  ) % len(chord_set)
-
-                  chord = chord_set[chord_index]
-
-                  local_chord_t = t % chord_len
-
-                  step = int(
-                      local_chord_t // beat
-                  ) % len(pattern)
-
-                  note_index = pattern[step] % len(chord)
-                  note = chord[note_index] * octave_factor
-                  local_note_t = local_chord_t % beat
-
-                  env = pluck_env(
-                      local_note_t,
-                      beat
-                  )
-
-                  pluck = (
-                      math.sin(2 * math.pi * note * t)
-                      + 0.22 * math.sin(
-                          2 * math.pi * note * 2 * t
-                      )
-                      + 0.08 * math.sin(
-                          2 * math.pi * note * 3 * t
-                      )
-                  ) * env
-
-                  root = chord[0] / 2.0
-                  penv = pad_env(
-                      local_chord_t,
-                      chord_len
-                  )
-
-                  pad = (
-                      math.sin(
-                          2 * math.pi * root * t
-                      )
-                      + 0.28 * math.sin(
-                          2 * math.pi * (root * 1.5) * t
-                      )
-                  ) * penv
-
-                  mono = (
-                      cfg["pluck"] * pluck
-                      + cfg["pad"] * pad
-                  )
-
-                  left = mono
-                  right = mono * 0.965
-
-                  frames += struct.pack(
-                      "<hh",
-                      int(clamp(left) * 32767),
-                      int(clamp(right) * 32767)
-                  )
-
-              wf.writeframes(frames)
-
-          print(
-              f"Estilo: {style} | origem: {source} | BPM: {bpm}"
-          )
-          print(
-              f"Seed: {seed} | padrao: {pattern}"
-          )
-          print(
-              f"Trilha adaptativa criada: {duration:.2f}s"
-          )
-          PY
-
-          test -s output/stage09/original_bed.wav
-
-          FADE_OUT_START=$(awk \
-            -v d="$VIDEO_DURATION" \
-            'BEGIN {
-              s=d-2.0;
-              if (s < 0) s=0;
-              printf "%.3f", s
-            }')
-
-          ffmpeg -y \
-            -i output/stage09/original_bed.wav \
-            -af "\
-              highpass=f=70,\
-              lowpass=f=4200,\
-              afade=t=in:st=0:d=1.2,\
-              afade=t=out:st=${FADE_OUT_START}:d=2.0,\
-              loudnorm=I=-28:TP=-8:LRA=5" \
-            -c:a aac \
-            -b:a 128k \
-            output/stage09/original_bed.m4a
-
-          test -s output/stage09/original_bed.m4a
-
-          BED_MEAN=$(ffmpeg \
-            -hide_banner \
-            -i output/stage09/original_bed.m4a \
-            -af volumedetect \
-            -f null - 2>&1 \
-            | sed -n 's/.*mean_volume: \([-0-9.]*\) dB.*/\1/p' \
-            | tail -1)
-
-          if [ -z "$BED_MEAN" ]; then
-            echo "ERRO: nao foi possivel medir o volume da musica."
-            exit 1
-          fi
-
-          BED_TOO_LOW=$(awk \
-            -v v="$BED_MEAN" \
-            'BEGIN { if (v < -34.0) print 1; else print 0 }')
-
-          echo "Volume medio da musica: ${BED_MEAN} dB"
-
-          if [ "$BED_TOO_LOW" = "1" ]; then
-            echo "ERRO: a musica ficou baixa demais para ser audivel."
-            exit 1
-          fi
-
-          echo "========================================"
-          echo "TRILHA ADAPTATIVA GERADA"
-          cat output/stage09/track_style.txt
-          echo "Ruido / vento / pink noise: NAO"
-          echo "Arquivo musical externo: NAO"
-          echo "========================================"
-
-      - name: Stage 09 - Ducking Inteligente e Mix Final
-        shell: bash
-        run: |
-          set -e
-
-          VIDEO_DURATION=$(ffprobe \
-            -v error \
-            -show_entries format=duration \
-            -of default=noprint_wrappers=1:nokey=1 \
-            output/stage08/final_ai_director.mp4)
-
-          if [ -f output/stage08/no_narration.flag ]; then
-
-            # Sem locucao: mantem a trilha discretissima.
-            ffmpeg -y \
-              -i output/stage08/final_ai_director.mp4 \
-              -i output/stage09/original_bed.m4a \
-              -filter_complex "\
-                [1:a]volume=0.70[bed];\
-                [bed]apad[bedpad]" \
-              -map 0:v:0 \
-              -map "[bedpad]" \
-              -c:v copy \
-              -c:a aac \
-              -b:a 160k \
-              -t "$VIDEO_DURATION" \
-              -movflags +faststart \
-              output/stage09/final_with_music.mp4
-
-          else
-
-            # ---------------------------------------------------
-            # COM LOCUCAO:
-            #
-            # A trilha ja chega muito baixa.
-            # O sidechaincompress reduz ainda mais sempre que a voz entra.
-            #
-            # attack curto = abaixa rapido
-            # release suave = volta sem "bombear"
-            # ---------------------------------------------------
-
-            ffmpeg -y \
-              -i output/stage08/final_ai_director.mp4 \
-              -i output/stage09/original_bed.m4a \
-              -filter_complex "\
-                [0:a]aresample=48000,\
-                aformat=sample_fmts=fltp:channel_layouts=stereo,\
-                volume=1.0,\
-                asplit=2[voice_mix][voice_sc];\
-                [1:a]aresample=48000,\
-                aformat=sample_fmts=fltp:channel_layouts=stereo,\
-                volume=0.48[bedpre];\
-                [bedpre][voice_sc]sidechaincompress=\
-                threshold=0.030:ratio=3:attack=20:release=420:makeup=1[ducked];\
-                [ducked]volume=0.72[bedlow];\
-                [voice_mix][bedlow]amix=inputs=2:duration=first:dropout_transition=0,\
-                alimiter=limit=0.94[mix]" \
-              -map 0:v:0 \
-              -map "[mix]" \
-              -c:v copy \
-              -c:a aac \
-              -b:a 160k \
-              -t "$VIDEO_DURATION" \
-              -movflags +faststart \
-              output/stage09/final_with_music.mp4
-
-          fi
-
-          test -s output/stage09/final_with_music.mp4
-
-      - name: Stage 09 - Validar Trilha e Ducking
-        shell: bash
-        run: |
-          set -e
-
-          test -s output/stage09/final_with_music.mp4
-          test -s output/stage09/original_bed.m4a
-
-          WIDTH=$(ffprobe \
-            -v error \
-            -select_streams v:0 \
-            -show_entries stream=width \
-            -of csv=p=0 \
-            output/stage09/final_with_music.mp4)
-
-          HEIGHT=$(ffprobe \
-            -v error \
-            -select_streams v:0 \
-            -show_entries stream=height \
-            -of csv=p=0 \
-            output/stage09/final_with_music.mp4)
 
           AUDIO_COUNT=$(ffprobe \
             -v error \
             -select_streams a \
             -show_entries stream=index \
             -of csv=p=0 \
-            output/stage09/final_with_music.mp4 \
+            "$INPUT" \
             | wc -l)
+
+          echo "========================================"
+          echo "STAGE 09 - ACABAMENTO VISUAL"
+          echo "Duracao de entrada: $VIDEO_DURATION s"
+          echo "Audio detectado: $AUDIO_COUNT stream(s)"
+          echo "========================================"
+
+          if [ "$AUDIO_COUNT" -gt 0 ]; then
+
+            ffmpeg -y \
+              -i "$INPUT" \
+              -map 0:v:0 \
+              -map 0:a:0 \
+              -vf "\
+                eq=contrast=1.025:brightness=0.003:saturation=1.035,\
+                unsharp=3:3:0.22:3:3:0.0,\
+                format=yuv420p" \
+              -c:v libx264 \
+              -preset veryfast \
+              -crf 19 \
+              -c:a copy \
+              -movflags +faststart \
+              "$OUTPUT"
+
+          else
+
+            ffmpeg -y \
+              -i "$INPUT" \
+              -map 0:v:0 \
+              -an \
+              -vf "\
+                eq=contrast=1.025:brightness=0.003:saturation=1.035,\
+                unsharp=3:3:0.22:3:3:0.0,\
+                format=yuv420p" \
+              -c:v libx264 \
+              -preset veryfast \
+              -crf 19 \
+              -movflags +faststart \
+              "$OUTPUT"
+
+          fi
+
+          test -s "$OUTPUT"
+
+      - name: Stage 09 - Validar Acabamento Visual
+        shell: bash
+        run: |
+          set -e
+
+          INPUT="output/stage08/final_ai_director.mp4"
+          OUTPUT="output/stage09/final_visual_polish.mp4"
+
+          test -s "$INPUT"
+          test -s "$OUTPUT"
+
+          IN_DURATION=$(ffprobe \
+            -v error \
+            -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 \
+            "$INPUT")
+
+          OUT_DURATION=$(ffprobe \
+            -v error \
+            -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 \
+            "$OUTPUT")
+
+          WIDTH=$(ffprobe \
+            -v error \
+            -select_streams v:0 \
+            -show_entries stream=width \
+            -of csv=p=0 \
+            "$OUTPUT")
+
+          HEIGHT=$(ffprobe \
+            -v error \
+            -select_streams v:0 \
+            -show_entries stream=height \
+            -of csv=p=0 \
+            "$OUTPUT")
+
+          IN_AUDIO=$(ffprobe \
+            -v error \
+            -select_streams a \
+            -show_entries stream=index \
+            -of csv=p=0 \
+            "$INPUT" \
+            | wc -l)
+
+          OUT_AUDIO=$(ffprobe \
+            -v error \
+            -select_streams a \
+            -show_entries stream=index \
+            -of csv=p=0 \
+            "$OUTPUT" \
+            | wc -l)
+
+          DURATION_DIFF=$(awk \
+            -v a="$IN_DURATION" \
+            -v b="$OUT_DURATION" \
+            'BEGIN {
+              d=a-b;
+              if (d < 0) d=-d;
+              printf "%.6f", d
+            }')
+
+          DURATION_BAD=$(awk \
+            -v d="$DURATION_DIFF" \
+            'BEGIN { if (d > 0.10) print 1; else print 0 }')
 
           if [ "$WIDTH" != "1080" ] || [ "$HEIGHT" != "1920" ]; then
             echo "ERRO: Stage 09 fora de 1080x1920."
             exit 1
           fi
 
-          if [ "$AUDIO_COUNT" -lt 1 ]; then
-            echo "ERRO: Stage 09 sem audio."
+          if [ "$DURATION_BAD" = "1" ]; then
+            echo "ERRO: Stage 09 alterou a duracao."
+            echo "Entrada: $IN_DURATION s"
+            echo "Saida:   $OUT_DURATION s"
+            exit 1
+          fi
+
+          if [ "$IN_AUDIO" != "$OUT_AUDIO" ]; then
+            echo "ERRO: Stage 09 alterou a quantidade de streams de audio."
             exit 1
           fi
 
           echo "========================================"
-          echo "STAGE 09 TRILHA + DUCKING VALIDADO"
-          echo "Trilha externa: NAO"
-          echo "Trilha tonal original: SIM"
-          echo "Selecao AUTO ou manual de estilo: SIM"
-          echo "Variacao por episodio dentro do mesmo estilo: SIM"
-          echo "Volume de fundo: BAIXO E AUDIVEL"
-          echo "Ducking durante locucao: ATIVO"
-          echo "Voz dividida para sidechain + mix: OK"
-          echo "Fade-in / fade-out: ATIVOS"
-          echo "Gemini usado neste stage: NAO"
+          echo "STAGE 09 ACABAMENTO VISUAL VALIDADO"
+          echo "Resolucao: 1080x1920"
+          echo "Duracao preservada: SIM"
+          echo "Audio preservado: SIM"
+          echo "Narracao reprocessada: NAO"
+          echo "Legenda original preservada: SIM"
+          echo "Zoom/crop adicional: NAO"
+          echo "Trilha sonora: NAO"
           echo "========================================"
 
-      - name: Disponibilizar Stage 09 Trilha
+      - name: Disponibilizar Stage 09 Acabamento Visual
         uses: actions/upload-artifact@v4
         with:
-          name: stage-09-trilha-ducking
+          name: stage-09-visual-polish
           path: |
-            output/stage09/original_bed.m4a
-            output/stage09/final_with_music.mp4
-            output/stage09/track_style.txt
+            output/stage09/final_visual_polish.mp4
           retention-days: 7
           if-no-files-found: error
 
@@ -3201,6 +2660,7 @@ jobs:
           set -e
 
           test -s output/stage08/final_ai_director.mp4
+          test -s output/stage09/final_visual_polish.mp4
           test -s output/stage06_ai/director_plan.json
 
           WIDTH=$(ffprobe \
@@ -3208,14 +2668,14 @@ jobs:
             -select_streams v:0 \
             -show_entries stream=width \
             -of csv=p=0 \
-            output/stage08/final_ai_director.mp4)
+            output/stage09/final_visual_polish.mp4)
 
           HEIGHT=$(ffprobe \
             -v error \
             -select_streams v:0 \
             -show_entries stream=height \
             -of csv=p=0 \
-            output/stage08/final_ai_director.mp4)
+            output/stage09/final_visual_polish.mp4)
 
           if [ "$WIDTH" != "1080" ] || [ "$HEIGHT" != "1920" ]; then
             echo "ERRO: final fora de 1080x1920."
@@ -3223,7 +2683,7 @@ jobs:
           fi
 
           echo "========================================"
-          echo "V15.16 TRILHA ADAPTATIVA POR ESTILO VALIDADA"
+          echo "V15.18 ACABAMENTO VISUAL VALIDADO"
           echo "Vision: OK"
           echo "Prompt opcional: OK"
           echo "Video sem narracao: suportado"
@@ -3231,7 +2691,8 @@ jobs:
           echo "Plano manual sem IA: suportado"
           echo "Reuso de plano aprovado sem Gemini: suportado"
           echo "Legenda original preservada como ancora semantica: suportado"
-          echo "Trilha procedural original + ducking: suportado"
+          echo "Trilha sonora: DESATIVADA"
+          echo "Acabamento visual conservador: suportado"
           echo "Freeze final: removido"
           echo "========================================"
 
@@ -3303,9 +2764,7 @@ jobs:
             output/stage08/narration_raw.mp3
             output/stage08/narration_master.m4a
             output/stage08/final_ai_director.mp4
-            output/stage09/final_with_music.mp4
-            output/stage09/original_bed.m4a
-            output/stage09/track_style.txt
+            output/stage09/final_visual_polish.mp4
             output/stage06_ai/director_plan.json
             output/stage06_ai/provider.txt
           retention-days: 7
