@@ -1,4 +1,4 @@
-name: Parece Mentira - Video Engine V15.5 Gemini Editorial Resiliente
+name: Parece Mentira - Video Engine V15.6 Sincronismo Narracao Visual
 on:
   workflow_dispatch:
     inputs:
@@ -1005,6 +1005,23 @@ jobs:
               - fazer um video mais curto e coeso,
               escolha o video mais curto e coeso.
 
+          21. SINCRONISMO DE FALA POR ITEM.
+              A narracao de cada item PRECISA caber na duracao daquele item.
+              Use como referencia maxima aproximadamente 2.0 palavras por segundo.
+              Exemplos:
+              - 3 segundos: cerca de 6 palavras
+              - 5 segundos: cerca de 10 palavras
+              - 8 segundos: cerca de 16 palavras
+              Se precisar dizer mais, distribua a ideia entre cenas coerentes.
+              Nao concentre uma frase longa em uma imagem curta.
+
+          22. SOMA FINAL.
+              Antes de responder, confira mentalmente:
+              - soma das duracoes da timeline
+              - quantidade total de palavras narradas
+              - se a narracao cabe confortavelmente no tempo visual
+              A voz deve terminar ANTES ou junto do ultimo frame, nunca depois.
+
           RETORNE SOMENTE JSON VALIDO neste formato:
 
           {{
@@ -1278,6 +1295,34 @@ jobs:
                   # evita que uma tomada comum fique longa demais.
                   if float(item["duration"]) > 8.0:
                       item["duration"] = 8.0
+
+                  # Sincronismo automatico:
+                  # se a fala estimada nao couber na cena planejada,
+                  # aumenta a duracao apenas dentro do limite visual.
+                  # Nunca congela frame.
+                  narration = str(
+                      item.get("narration", "")
+                  ).strip()
+
+                  if narration:
+                      words = len(narration.split())
+                      estimated_voice = words / 2.05
+                      current_duration = float(item["duration"])
+
+                      if estimated_voice > current_duration:
+                          desired = estimated_voice * 1.03
+                          editorial_cap = min(
+                              max_allowed,
+                              8.0
+                          )
+
+                          item["duration"] = round(
+                              min(
+                                  desired,
+                                  editorial_cap
+                              ),
+                              3
+                          )
 
           timeline_duration = sum(
               float(i["duration"])
@@ -2102,7 +2147,7 @@ jobs:
       # STAGE 08 - FIT GLOBAL
       #
       # Se a voz ficar maior que o video:
-      # - acelera no maximo 8%
+      # - ajusta a velocidade de forma suave, no maximo 15%
       # - se ainda ficar maior, FALHA em vez de congelar imagem
       #
       # Isso obriga o AI Director a trabalhar dentro do tempo real.
@@ -2140,8 +2185,8 @@ jobs:
           TEMPO=$(awk -v r="$RATIO" '
             BEGIN {
               if (r <= 1.00) t=1.00;
-              else if (r <= 1.08) t=r;
-              else t=1.08;
+              else if (r <= 1.15) t=r;
+              else t=1.15;
               printf "%.6f", t
             }')
 
@@ -2163,22 +2208,28 @@ jobs:
             -v v="$VIDEO_DURATION" \
             'BEGIN { if (a > v + 0.35) print 1; else print 0 }')
 
+          echo "Duracao visual: $VIDEO_DURATION s"
+          echo "Duracao voz original: $AUDIO_DURATION s"
+          echo "Atempo aplicado: $TEMPO"
+          echo "Duracao voz ajustada: $FITTED_AUDIO s"
+
           if [ "$TOO_LONG" = "1" ]; then
-            echo "ERRO: narracao maior que o master visual."
+            echo "ERRO: narracao ainda maior que o master visual apos ajuste de ate 15%."
             echo "Nao sera usado freeze frame."
-            echo "Revise director_plan.json."
+            echo "O plano precisa de menos texto ou mais tempo visual."
             exit 1
           fi
 
           ffmpeg -y \
             -i output/stage07/ai_visual_master.mp4 \
             -i output/stage08/narration_master.m4a \
+            -filter_complex "[1:a]apad[aout]" \
             -map 0:v:0 \
-            -map 1:a:0 \
+            -map "[aout]" \
             -c:v copy \
             -c:a aac \
             -b:a 160k \
-            -shortest \
+            -t "$VIDEO_DURATION" \
             -movflags +faststart \
             output/stage08/final_ai_director.mp4
 
@@ -2216,7 +2267,7 @@ jobs:
           fi
 
           echo "========================================"
-          echo "V15.5 GEMINI EDITORIAL RESILIENTE VALIDADO"
+          echo "V15.6 SINCRONISMO NARRACAO VISUAL VALIDADO"
           echo "Vision: OK"
           echo "Prompt opcional: OK"
           echo "Video sem narracao: suportado"
