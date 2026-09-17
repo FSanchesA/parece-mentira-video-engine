@@ -1,4 +1,4 @@
-name: Parece Mentira - Video Engine V3.1
+name: Parece Mentira - Video Engine V3.2
 
 on:
   workflow_dispatch:
@@ -82,7 +82,11 @@ jobs:
             exit 1
           fi
 
+          FINAL_START=$(awk -v d="$DURATION" \
+            'BEGIN { s=d-2.5; if (s<0) s=0; printf "%.3f", s }')
+
           echo "DURATION=$DURATION" >> "$GITHUB_ENV"
+          echo "FINAL_START=$FINAL_START" >> "$GITHUB_ENV"
 
           ffprobe \
             -v error \
@@ -92,41 +96,32 @@ jobs:
             "$VIDEO" \
             > output/source_report.txt
 
-          echo "========================================"
-          echo "SOURCE ANALYSIS"
-          echo "Duracao: $DURATION segundos"
-          echo "========================================"
-
-          cat output/source_report.txt
+          echo "Duracao: $DURATION"
+          echo "Assinatura final inicia: $FINAL_START"
 
       # =========================================================
       # STAGE 01
-      # BRANDING
+      # BRANDING EDITORIAL
       #
-      # IMPORTANTE:
-      # - timeline original preservada
-      # - sem cortes
-      # - sem reordenacao
+      # Fonte permanece com timeline intacta.
       #
-      # A logo foi achatada para 190x130.
+      # Ciclo:
+      # SUPERIOR -> evapora -> pausa -> INFERIOR
+      # INFERIOR -> evapora -> pausa -> SUPERIOR
       #
-      # O movimento ocorre em blocos independentes.
-      # Cada bloco da logo recebe fade IN e OUT.
-      #
-      # Isso evita depender de expressoes dinamicas
-      # de alpha incompatíveis com colorchannelmixer.
+      # Evita mostrar as duas logos simultaneamente.
       # =========================================================
 
-      - name: Stage 01 - Branding Animado
+      - name: Stage 01 - Branding Editorial
         shell: bash
         run: |
           set -e
 
           echo "========================================"
-          echo "STAGE 01 - BRANDING ANIMADO"
-          echo "Logo: 190x130"
-          echo "Fade progressivo"
-          echo "Timeline original preservada"
+          echo "STAGE 01 - BRANDING EDITORIAL"
+          echo "Selo: 205x125"
+          echo "Transicao: evaporar -> pausa -> nascer"
+          echo "Final: logo central grande"
           echo "========================================"
 
           ffmpeg -y \
@@ -140,95 +135,110 @@ jobs:
             [base];\
             \
             [1:v]\
-            scale=190:130,\
+            scale=205:125,\
             format=rgba,\
             split=10\
-            [l0][l1][l2][l3][l4][l5][l6][l7][l8][l9];\
+            [a0][a1][a2][a3][a4][a5][a6][a7][a8][a9];\
             \
-            [l0]fade=t=out:st=7.6:d=1.4:alpha=1[top0];\
+            [a0]\
+            fade=t=out:st=7.6:d=1.1:alpha=1\
+            [top0];\
             \
-            [l1]\
-            fade=t=in:st=7.6:d=1.4:alpha=1,\
-            fade=t=out:st=16.6:d=1.4:alpha=1\
+            [a1]\
+            fade=t=in:st=9.0:d=0.6:alpha=1,\
+            fade=t=out:st=16.6:d=1.1:alpha=1\
             [bottom0];\
             \
-            [l2]\
-            fade=t=in:st=16.6:d=1.4:alpha=1,\
-            fade=t=out:st=25.6:d=1.4:alpha=1\
+            [a2]\
+            fade=t=in:st=18.0:d=0.6:alpha=1,\
+            fade=t=out:st=25.6:d=1.1:alpha=1\
             [top1];\
             \
-            [l3]\
-            fade=t=in:st=25.6:d=1.4:alpha=1,\
-            fade=t=out:st=34.6:d=1.4:alpha=1\
+            [a3]\
+            fade=t=in:st=27.0:d=0.6:alpha=1,\
+            fade=t=out:st=34.6:d=1.1:alpha=1\
             [bottom1];\
             \
-            [l4]\
-            fade=t=in:st=34.6:d=1.4:alpha=1,\
-            fade=t=out:st=43.6:d=1.4:alpha=1\
+            [a4]\
+            fade=t=in:st=36.0:d=0.6:alpha=1,\
+            fade=t=out:st=43.6:d=1.1:alpha=1\
             [top2];\
             \
-            [l5]\
-            fade=t=in:st=43.6:d=1.4:alpha=1,\
-            fade=t=out:st=52.6:d=1.4:alpha=1\
+            [a5]\
+            fade=t=in:st=45.0:d=0.6:alpha=1,\
+            fade=t=out:st=52.6:d=1.1:alpha=1\
             [bottom2];\
             \
-            [l6]\
-            fade=t=in:st=52.6:d=1.4:alpha=1,\
-            fade=t=out:st=61.6:d=1.4:alpha=1\
+            [a6]\
+            fade=t=in:st=54.0:d=0.6:alpha=1,\
+            fade=t=out:st=61.6:d=1.1:alpha=1\
             [top3];\
             \
-            [l7]\
-            fade=t=in:st=61.6:d=1.4:alpha=1,\
-            fade=t=out:st=70.6:d=1.4:alpha=1\
+            [a7]\
+            fade=t=in:st=63.0:d=0.6:alpha=1,\
+            fade=t=out:st=70.6:d=1.1:alpha=1\
             [bottom3];\
             \
-            [l8]\
-            fade=t=in:st=70.6:d=1.4:alpha=1,\
-            fade=t=out:st=79.6:d=1.4:alpha=1\
+            [a8]\
+            fade=t=in:st=72.0:d=0.6:alpha=1,\
+            fade=t=out:st=79.6:d=1.1:alpha=1\
             [top4];\
             \
-            [l9]\
-            fade=t=in:st=79.6:d=1.4:alpha=1\
+            [a9]\
+            fade=t=in:st=81.0:d=0.6:alpha=1\
             [bottom4];\
             \
             [base][top0]\
-            overlay=x=W-w-45:y=415:enable='between(t,0,9)'\
+            overlay=x=W-w-35:y=415:enable='between(t,0,8.7)'\
             [v1];\
             \
             [v1][bottom0]\
-            overlay=x=95:y=H-h-605:enable='between(t,7.6,18)'\
+            overlay=x=75:y=H-h-600:enable='between(t,9,17.7)'\
             [v2];\
             \
             [v2][top1]\
-            overlay=x=W-w-45:y=415:enable='between(t,16.6,27)'\
+            overlay=x=W-w-35:y=415:enable='between(t,18,26.7)'\
             [v3];\
             \
             [v3][bottom1]\
-            overlay=x=95:y=H-h-605:enable='between(t,25.6,36)'\
+            overlay=x=75:y=H-h-600:enable='between(t,27,35.7)'\
             [v4];\
             \
             [v4][top2]\
-            overlay=x=W-w-45:y=415:enable='between(t,34.6,45)'\
+            overlay=x=W-w-35:y=415:enable='between(t,36,44.7)'\
             [v5];\
             \
             [v5][bottom2]\
-            overlay=x=95:y=H-h-605:enable='between(t,43.6,54)'\
+            overlay=x=75:y=H-h-600:enable='between(t,45,53.7)'\
             [v6];\
             \
             [v6][top3]\
-            overlay=x=W-w-45:y=415:enable='between(t,52.6,63)'\
+            overlay=x=W-w-35:y=415:enable='between(t,54,62.7)'\
             [v7];\
             \
             [v7][bottom3]\
-            overlay=x=95:y=H-h-605:enable='between(t,61.6,72)'\
+            overlay=x=75:y=H-h-600:enable='between(t,63,71.7)'\
             [v8];\
             \
             [v8][top4]\
-            overlay=x=W-w-45:y=415:enable='between(t,70.6,81)'\
+            overlay=x=W-w-35:y=415:enable='between(t,72,80.7)'\
             [v9];\
             \
             [v9][bottom4]\
-            overlay=x=95:y=H-h-605:enable='gte(t,79.6)'\
+            overlay=x=75:y=H-h-600:enable='gte(t,81)'\
+            [corner_branding];\
+            \
+            [1:v]\
+            scale=540:540,\
+            format=rgba,\
+            fade=t=in:st=${FINAL_START}:d=0.7:alpha=1\
+            [final_logo];\
+            \
+            [corner_branding][final_logo]\
+            overlay=\
+            x=(W-w)/2:\
+            y=(H-h)/2:\
+            enable='gte(t,${FINAL_START})'\
             [clean]" \
             -map "[clean]" \
             -map 0:a? \
@@ -267,15 +277,6 @@ jobs:
             -of csv=p=0 \
             output/clean_master.mp4)
 
-          CLEAN_DURATION=$(ffprobe \
-            -v error \
-            -show_entries format=duration \
-            -of default=noprint_wrappers=1:nokey=1 \
-            output/clean_master.mp4)
-
-          echo "Resolucao: ${WIDTH}x${HEIGHT}"
-          echo "Duracao: $CLEAN_DURATION"
-
           if [ "$WIDTH" != "1080" ] || [ "$HEIGHT" != "1920" ]; then
             echo "ERRO: Stage 01 fora de 1080x1920."
             exit 1
@@ -293,11 +294,6 @@ jobs:
         run: |
           set -e
 
-          echo "========================================"
-          echo "STAGE 02 - EDITORIAL MASTER"
-          echo "Removendo audio original"
-          echo "========================================"
-
           ffmpeg -y \
             -i output/clean_master.mp4 \
             -map 0:v:0 \
@@ -308,10 +304,6 @@ jobs:
             -crf 20 \
             -movflags +faststart \
             output/editorial_master.mp4
-
-      # =========================================================
-      # VALIDAR STAGE 02
-      # =========================================================
 
       - name: Validar Stage 02
         shell: bash
@@ -328,20 +320,6 @@ jobs:
             output/editorial_master.mp4 \
             | tee output/editorial_report.txt
 
-          WIDTH=$(ffprobe \
-            -v error \
-            -select_streams v:0 \
-            -show_entries stream=width \
-            -of csv=p=0 \
-            output/editorial_master.mp4)
-
-          HEIGHT=$(ffprobe \
-            -v error \
-            -select_streams v:0 \
-            -show_entries stream=height \
-            -of csv=p=0 \
-            output/editorial_master.mp4)
-
           AUDIO_COUNT=$(ffprobe \
             -v error \
             -select_streams a \
@@ -349,11 +327,6 @@ jobs:
             -of csv=p=0 \
             output/editorial_master.mp4 \
             | wc -l)
-
-          if [ "$WIDTH" != "1080" ] || [ "$HEIGHT" != "1920" ]; then
-            echo "ERRO: resolucao Stage 02 incorreta."
-            exit 1
-          fi
 
           if [ "$AUDIO_COUNT" -ne 0 ]; then
             echo "ERRO: Stage 02 ainda possui audio."
@@ -371,10 +344,6 @@ jobs:
         shell: bash
         run: |
           set -e
-
-          echo "========================================"
-          echo "STAGE 03 - SCENE DETECTION"
-          echo "========================================"
 
           ffmpeg \
             -hide_banner \
@@ -406,14 +375,11 @@ jobs:
             output/scene_report_unique.txt \
             output/scene_report.txt
 
-          echo "========================================"
-          echo "PONTOS DETECTADOS"
-          echo "========================================"
-
+          echo "PONTOS DE CENA:"
           cat output/scene_report.txt
 
       # =========================================================
-      # PREVIEWS DAS CENAS
+      # PREVIEWS
       # =========================================================
 
       - name: Stage 03 - Gerar Previews
@@ -445,9 +411,6 @@ jobs:
             INDEX=$((INDEX + 1))
 
           done < output/scene_report.txt
-
-          echo "Previews:"
-          find output/scenes -type f -iname "*.jpg" | sort
 
       # =========================================================
       # ARTIFACTS
