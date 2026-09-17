@@ -1,0 +1,32 @@
+name: Teste FFmpeg
+
+on:
+  workflow_dispatch:
+
+jobs:
+  teste-ffmpeg:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixar repositorio
+        uses: actions/checkout@v4
+
+      - name: Instalar FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Verificar FFmpeg
+        run: |
+          echo "========================================"
+          echo "PARECE MENTIRA VIDEO ENGINE"
+          echo "Testando FFmpeg..."
+          echo "========================================"
+
+          ffmpeg -version
+          ffprobe -version
+
+          echo "========================================"
+          echo "FFmpeg funcionando corretamente!"
+          echo "Motor de video pronto."
+          echo "========================================"
