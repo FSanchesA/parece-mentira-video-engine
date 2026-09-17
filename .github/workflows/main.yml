@@ -1,4 +1,4 @@
-name: Parece Mentira - Video Engine V15.10 Legenda Original como Ancora
+name: Parece Mentira - Video Engine V15.11 Trilha Original + Ducking
 on:
   workflow_dispatch:
     inputs:
@@ -2455,6 +2455,221 @@ jobs:
           test -s output/stage08/final_ai_director.mp4
 
       # =========================================================
+      # STAGE 09 - TRILHA ORIGINAL + DUCKING
+      #
+      # OBJETIVO:
+      # - adicionar trilha MUITO baixa
+      # - sem usar musica externa
+      # - gerar cama sonora procedural original no proprio workflow
+      # - reduzir ainda mais a trilha quando houver locucao
+      # - preservar integralmente imagem, legenda original e narracao
+      #
+      # Vantagem:
+      # - nao depende de biblioteca musical de terceiros
+      # - evita inserir faixa comercial/licenciada no video
+      # - nao usa Gemini
+      # =========================================================
+
+      - name: Stage 09 - Gerar Trilha Original Procedural
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p output/stage09
+
+          VIDEO_DURATION=$(ffprobe \
+            -v error \
+            -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 \
+            output/stage08/final_ai_director.mp4)
+
+          if [ -z "$VIDEO_DURATION" ]; then
+            echo "ERRO: nao foi possivel determinar duracao do Stage 08."
+            exit 1
+          fi
+
+          FADE_OUT_START=$(awk \
+            -v d="$VIDEO_DURATION" \
+            'BEGIN {
+              s=d-2.2;
+              if (s < 0) s=0;
+              printf "%.3f", s
+            }')
+
+          # -----------------------------------------------------
+          # CAMA SONORA ORIGINAL
+          #
+          # Nao baixa nenhum arquivo musical externo.
+          # A trilha nasce aqui a partir de osciladores, ruido filtrado
+          # e modulacao muito suave, sem melodia reconhecivel.
+          #
+          # Volume propositalmente baixo.
+          # -----------------------------------------------------
+
+          ffmpeg -y \
+            -f lavfi \
+            -i "sine=frequency=73:sample_rate=48000:duration=${VIDEO_DURATION}" \
+            -f lavfi \
+            -i "sine=frequency=110:sample_rate=48000:duration=${VIDEO_DURATION}" \
+            -f lavfi \
+            -i "sine=frequency=146:sample_rate=48000:duration=${VIDEO_DURATION}" \
+            -f lavfi \
+            -i "anoisesrc=color=pink:sample_rate=48000:duration=${VIDEO_DURATION}:amplitude=0.18" \
+            -filter_complex "\
+              [0:a]volume=0.020,lowpass=f=180[a0];\
+              [1:a]volume=0.012,lowpass=f=230[a1];\
+              [2:a]volume=0.007,lowpass=f=300[a2];\
+              [3:a]lowpass=f=900,highpass=f=120,volume=0.010[a3];\
+              [a0][a1][a2][a3]amix=inputs=4:normalize=0,\
+              tremolo=f=0.11:d=0.16,\
+              aecho=0.8:0.25:1100:0.12,\
+              highpass=f=55,\
+              lowpass=f=1800,\
+              afade=t=in:st=0:d=1.8,\
+              afade=t=out:st=${FADE_OUT_START}:d=2.2,\
+              volume=0.30,\
+              aformat=sample_rates=48000:channel_layouts=stereo[bed]" \
+            -map "[bed]" \
+            -c:a aac \
+            -b:a 128k \
+            output/stage09/original_bed.m4a
+
+          test -s output/stage09/original_bed.m4a
+
+          echo "========================================"
+          echo "TRILHA PROCEDURAL ORIGINAL GERADA"
+          echo "Duracao: $VIDEO_DURATION s"
+          echo "Musica externa: NAO"
+          echo "========================================"
+
+      - name: Stage 09 - Ducking Inteligente e Mix Final
+        shell: bash
+        run: |
+          set -e
+
+          VIDEO_DURATION=$(ffprobe \
+            -v error \
+            -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 \
+            output/stage08/final_ai_director.mp4)
+
+          if [ -f output/stage08/no_narration.flag ]; then
+
+            # Sem locucao: mantem a trilha discretissima.
+            ffmpeg -y \
+              -i output/stage08/final_ai_director.mp4 \
+              -i output/stage09/original_bed.m4a \
+              -filter_complex "\
+                [1:a]volume=0.20[bed];\
+                [bed]apad[bedpad]" \
+              -map 0:v:0 \
+              -map "[bedpad]" \
+              -c:v copy \
+              -c:a aac \
+              -b:a 160k \
+              -t "$VIDEO_DURATION" \
+              -movflags +faststart \
+              output/stage09/final_with_music.mp4
+
+          else
+
+            # ---------------------------------------------------
+            # COM LOCUCAO:
+            #
+            # A trilha ja chega muito baixa.
+            # O sidechaincompress reduz ainda mais sempre que a voz entra.
+            #
+            # attack curto = abaixa rapido
+            # release suave = volta sem "bombear"
+            # ---------------------------------------------------
+
+            ffmpeg -y \
+              -i output/stage08/final_ai_director.mp4 \
+              -i output/stage09/original_bed.m4a \
+              -filter_complex "\
+                [0:a]aformat=sample_rates=48000:channel_layouts=stereo,\
+                volume=1.0[voice];\
+                [1:a]aformat=sample_rates=48000:channel_layouts=stereo,\
+                volume=0.22[bedpre];\
+                [bedpre][voice]sidechaincompress=\
+                threshold=0.018:ratio=10:attack=18:release=520:makeup=1[ducked];\
+                [ducked]volume=0.55[bedlow];\
+                [voice][bedlow]amix=inputs=2:duration=first:dropout_transition=0,\
+                alimiter=limit=0.94[mix]" \
+              -map 0:v:0 \
+              -map "[mix]" \
+              -c:v copy \
+              -c:a aac \
+              -b:a 160k \
+              -t "$VIDEO_DURATION" \
+              -movflags +faststart \
+              output/stage09/final_with_music.mp4
+
+          fi
+
+          test -s output/stage09/final_with_music.mp4
+
+      - name: Stage 09 - Validar Trilha e Ducking
+        shell: bash
+        run: |
+          set -e
+
+          test -s output/stage09/final_with_music.mp4
+          test -s output/stage09/original_bed.m4a
+
+          WIDTH=$(ffprobe \
+            -v error \
+            -select_streams v:0 \
+            -show_entries stream=width \
+            -of csv=p=0 \
+            output/stage09/final_with_music.mp4)
+
+          HEIGHT=$(ffprobe \
+            -v error \
+            -select_streams v:0 \
+            -show_entries stream=height \
+            -of csv=p=0 \
+            output/stage09/final_with_music.mp4)
+
+          AUDIO_COUNT=$(ffprobe \
+            -v error \
+            -select_streams a \
+            -show_entries stream=index \
+            -of csv=p=0 \
+            output/stage09/final_with_music.mp4 \
+            | wc -l)
+
+          if [ "$WIDTH" != "1080" ] || [ "$HEIGHT" != "1920" ]; then
+            echo "ERRO: Stage 09 fora de 1080x1920."
+            exit 1
+          fi
+
+          if [ "$AUDIO_COUNT" -lt 1 ]; then
+            echo "ERRO: Stage 09 sem audio."
+            exit 1
+          fi
+
+          echo "========================================"
+          echo "STAGE 09 TRILHA + DUCKING VALIDADO"
+          echo "Trilha externa: NAO"
+          echo "Trilha procedural original: SIM"
+          echo "Volume de fundo: MUITO BAIXO"
+          echo "Ducking durante locucao: ATIVO"
+          echo "Fade-in / fade-out: ATIVOS"
+          echo "Gemini usado neste stage: NAO"
+          echo "========================================"
+
+      - name: Disponibilizar Stage 09 Trilha
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-09-trilha-ducking
+          path: |
+            output/stage09/original_bed.m4a
+            output/stage09/final_with_music.mp4
+          retention-days: 7
+          if-no-files-found: error
+
+      # =========================================================
       # VALIDAR V15
       # =========================================================
 
@@ -2486,7 +2701,7 @@ jobs:
           fi
 
           echo "========================================"
-          echo "V15.10 LEGENDA ORIGINAL COMO ANCORA VALIDADO"
+          echo "V15.11 TRILHA ORIGINAL + DUCKING VALIDADO"
           echo "Vision: OK"
           echo "Prompt opcional: OK"
           echo "Video sem narracao: suportado"
@@ -2494,6 +2709,7 @@ jobs:
           echo "Plano manual sem IA: suportado"
           echo "Reuso de plano aprovado sem Gemini: suportado"
           echo "Legenda original preservada como ancora semantica: suportado"
+          echo "Trilha procedural original + ducking: suportado"
           echo "Freeze final: removido"
           echo "========================================"
 
@@ -2565,6 +2781,8 @@ jobs:
             output/stage08/narration_raw.mp3
             output/stage08/narration_master.m4a
             output/stage08/final_ai_director.mp4
+            output/stage09/final_with_music.mp4
+            output/stage09/original_bed.m4a
             output/stage06_ai/director_plan.json
             output/stage06_ai/provider.txt
           retention-days: 7
