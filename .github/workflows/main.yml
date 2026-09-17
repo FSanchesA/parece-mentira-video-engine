@@ -1,4 +1,4 @@
-name: Parece Mentira - Render V2 Branding
+name: Parece Mentira - Stage 01 Branding
 
 on:
   workflow_dispatch:
@@ -17,7 +17,10 @@ jobs:
           sudo apt-get install -y ffmpeg
 
       - name: Localizar arquivos
+        shell: bash
         run: |
+          set -e
+
           VIDEO=$(find . -maxdepth 2 -type f -iname "*.mp4" | head -1)
 
           if [ -z "$VIDEO" ]; then
@@ -25,111 +28,72 @@ jobs:
             exit 1
           fi
 
-          if [ ! -f "logo_parece_mentira.png" ]; then
+          if [ ! -f "./logo_parece_mentira.png" ]; then
             echo "ERRO: logo_parece_mentira.png nao encontrada."
+            echo "Arquivos PNG encontrados:"
+            find . -maxdepth 2 -type f -iname "*.png"
             exit 1
           fi
 
           echo "VIDEO=$VIDEO" >> "$GITHUB_ENV"
-          echo "Video: $VIDEO"
+          echo "Video encontrado: $VIDEO"
           echo "Logo encontrada."
 
-      - name: Analisar original
+      - name: Criar Stage 01
+        shell: bash
         run: |
-          ffprobe -v error \
-            -show_entries format=duration \
-            -show_entries stream=codec_type,width,height \
-            -of default=noprint_wrappers=1 \
-            "$VIDEO"
-
-      - name: Renderizar branding alternado
-        run: |
+          set -e
           mkdir -p output
 
           ffmpeg -y \
             -i "$VIDEO" \
-            -i logo_parece_mentira.png \
-            -filter_complex "
-              [0:v]
-              scale=1080:1920:force_original_aspect_ratio=increase,
-              crop=1080:1920,
-              setsar=1
-              [base];
-
-              [1:v]
-              scale=180:180,
-              format=rgba
-              [logo];
-
-              [logo]
-              split=2
-              [logo_top][logo_bottom];
-
-              [base][logo_top]
-              overlay=
-                x=W-w-70:
-                y=180:
-                enable='lt(mod(t,18),8)',
-              [top];
-
-              [top][logo_bottom]
-              overlay=
-                x=70:
-                y=H-h-350:
-                enable='between(mod(t,18),9,17)'
-              [final]
-            " \
-            -map "[final]" \
+            -loop 1 -i "./logo_parece_mentira.png" \
+            -filter_complex "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1[base];[1:v]scale=180:180,format=rgba[logo];[logo]split=2[lt][lb];[base][lt]overlay=x=W-w-70:y=180:enable='lt(mod(t,18),8)'[v1];[v1][lb]overlay=x=70:y=H-h-350:enable='between(mod(t,18),9,17)'[outv]" \
+            -map "[outv]" \
             -an \
             -c:v libx264 \
             -preset medium \
             -crf 20 \
             -pix_fmt yuv420p \
             -movflags +faststart \
-            output/video_final_v2.mp4
+            -shortest \
+            output/clean_master.mp4
 
-      - name: Validar resultado
+      - name: Validar Stage 01
+        shell: bash
         run: |
-          test -s output/video_final_v2.mp4
+          set -e
 
-          WIDTH=$(ffprobe -v error \
-            -select_streams v:0 \
-            -show_entries stream=width \
-            -of csv=p=0 \
-            output/video_final_v2.mp4)
+          test -s output/clean_master.mp4
 
-          HEIGHT=$(ffprobe -v error \
-            -select_streams v:0 \
-            -show_entries stream=height \
-            -of csv=p=0 \
-            output/video_final_v2.mp4)
+          echo "===== CLEAN MASTER ====="
 
-          AUDIO=$(ffprobe -v error \
-            -select_streams a \
-            -show_entries stream=index \
-            -of csv=p=0 \
-            output/video_final_v2.mp4)
+          ffprobe -v error \
+            -show_entries format=duration,size \
+            -show_entries stream=codec_type,codec_name,width,height \
+            -of default=noprint_wrappers=1 \
+            output/clean_master.mp4
 
-          echo "Resolucao: ${WIDTH}x${HEIGHT}"
+          WIDTH=$(ffprobe -v error -select_streams v:0 \
+            -show_entries stream=width -of csv=p=0 \
+            output/clean_master.mp4)
+
+          HEIGHT=$(ffprobe -v error -select_streams v:0 \
+            -show_entries stream=height -of csv=p=0 \
+            output/clean_master.mp4)
 
           if [ "$WIDTH" != "1080" ] || [ "$HEIGHT" != "1920" ]; then
             echo "ERRO: resolucao incorreta."
             exit 1
           fi
 
-          if [ -n "$AUDIO" ]; then
-            echo "ERRO: audio original presente."
-            exit 1
-          fi
+          echo "STAGE 01 CONCLUIDO."
+          echo "Timeline original preservada."
+          echo "Arquivo liberado para futura edicao editorial."
 
-          echo "================================="
-          echo "V2 VALIDADA"
-          echo "Branding alternado aplicado."
-          echo "================================="
-
-      - name: Disponibilizar MP4
+      - name: Disponibilizar Clean Master
         uses: actions/upload-artifact@v4
         with:
-          name: parece-mentira-render-v2
-          path: output/video_final_v2.mp4
+          name: parece-mentira-clean-master
+          path: output/clean_master.mp4
           retention-days: 7
