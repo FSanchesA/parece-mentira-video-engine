@@ -228,7 +228,6 @@ jobs:
             [l8]fade=t=in:st=62.60:d=0.40:alpha=1,fade=t=out:st=71.95:d=0.55:alpha=1[bottom3];\
             [l9]fade=t=in:st=71.60:d=0.40:alpha=1,fade=t=out:st=${SMALL_FADE_START}:d=1.00:alpha=1[top4];\
             \
-            [base][top0]overlay=x=W-w-18:y=420:enable='between(t,0,9.5)'[v1];\
             [base][top0]overlay=x=W-w-28:y=420:enable='between(t,0,9.5)'[v1];\
             [v1][bottom0]overlay=x=28:y=H-h-625:enable='between(t,8.6,18.5)'[v2];\
             [v2][top1]overlay=x=W-w-28:y=420:enable='between(t,17.6,27.5)'[v3];\
