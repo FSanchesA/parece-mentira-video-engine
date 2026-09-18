@@ -585,7 +585,7 @@ jobs:
               compute_type="int8"
           )
 
-                    segments, info = model.transcribe(
+          segments, info = model.transcribe(
               "output/stage05/audio_whisper.wav",
               language=None,
               task="transcribe",
@@ -949,8 +949,8 @@ jobs:
           ).read_text(
               encoding="utf-8"
           ).strip()
-          
-                    transcript_meta = json.loads(
+
+          transcript_meta = json.loads(
               Path(
                   "output/stage05/transcript.json"
               ).read_text(
@@ -1002,7 +1002,7 @@ jobs:
           - Modo solicitado: {user_mode}
           - Contexto fornecido pelo usuario:
             {user_context or "[nao informado]"}
-          -           - Idioma detectado na fala original: {source_language}
+          - Idioma detectado na fala original: {source_language}
           - Confianca da deteccao de idioma: {source_language_probability:.3f}
           - Transcricao original NO IDIOMA ORIGINAL:
             {original_transcript or "[sem narracao detectada]"}
@@ -1194,7 +1194,7 @@ jobs:
               - onde ela pode entrar na timeline
               - qual trecho da nova narracao pode aparecer sobre ela
 
-                    26. IDIOMA E TRADUCAO DA NARRACAO.
+          26. IDIOMA E TRADUCAO DA NARRACAO.
               TODA narracao nova gerada pelo diretor deve ser em PORTUGUES DO BRASIL.
 
               Se o idioma original detectado for diferente de portugues:
@@ -2575,7 +2575,7 @@ jobs:
           echo "Atempo aplicado: $TEMPO"
           echo "Duracao voz ajustada: $FITTED_AUDIO s"
 
-                    if [ "$TOO_LONG" = "1" ]; then
+          if [ "$TOO_LONG" = "1" ]; then
             echo "AVISO: narracao maior que a timeline visual gerada pela IA."
             echo "Ativando fallback visual seguro com o Editorial Master completo."
             echo "Nao sera usado freeze frame."
