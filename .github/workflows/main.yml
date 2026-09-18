@@ -1,4 +1,4 @@
-name: Parece Mentira - Video Engine V15.20 App Backend
+name: Parece Mentira - Video Engine V15.21 Vision Frame Fix
 run-name: ${{ inputs.app_job_tag != '' && format('APP {0}', inputs.app_job_tag) || 'Execucao manual' }}
 on:
   workflow_dispatch:
@@ -775,32 +775,66 @@ jobs:
 
           font = get_font(28)
 
+          def probe_duration(path):
+              result = subprocess.run([
+                  "ffprobe", "-v", "error",
+                  "-show_entries", "format=duration",
+                  "-of", "default=noprint_wrappers=1:nokey=1",
+                  str(path)
+              ], check=True, capture_output=True, text=True)
+              return max(float(result.stdout.strip() or 0), 0.001)
+
+          def extract_frame(clip, t, out):
+              # Primeiro tenta o ponto solicitado. Em cenas extremamente curtas,
+              # o FFmpeg pode terminar sem erro e ainda assim nao gerar imagem.
+              subprocess.run([
+                  "ffmpeg", "-y",
+                  "-ss", f"{t:.6f}",
+                  "-i", str(clip),
+                  "-frames:v", "1",
+                  "-vf", "scale=320:-2",
+                  "-q:v", "3",
+                  str(out)
+              ], check=False, stdout=subprocess.DEVNULL,
+                 stderr=subprocess.DEVNULL)
+
+              if out.exists() and out.stat().st_size > 0:
+                  return
+
+              # Fallback robusto: primeiro frame real do clip.
+              subprocess.run([
+                  "ffmpeg", "-y",
+                  "-i", str(clip),
+                  "-frames:v", "1",
+                  "-vf", "scale=320:-2",
+                  "-q:v", "3",
+                  str(out)
+              ], check=True, stdout=subprocess.DEVNULL,
+                 stderr=subprocess.DEVNULL)
+
+              if not out.exists() or out.stat().st_size <= 0:
+                  raise RuntimeError(f"Nao foi possivel extrair frame de {clip}")
+
           for scene in manifest:
               num = int(scene["scene"])
               clip = Path("output/stage04_clips") / f"scene_{num:03d}.mp4"
-              duration = max(float(scene["duration"]), 0.3)
+
+              if not clip.exists() or clip.stat().st_size <= 0:
+                  raise FileNotFoundError(f"Clip ausente ou vazio: {clip}")
+
+              # Usa a duracao REAL do arquivo. Nao infla cenas curtas para 0.3 s,
+              # pois isso fazia os seeks cairem depois do fim do clip.
+              duration = probe_duration(clip)
 
               frame_paths = []
 
               for idx, fraction in enumerate((0.20, 0.50, 0.80), start=1):
-                  t = min(
-                      max(duration * fraction, 0.05),
-                      max(duration - 0.05, 0.05)
-                  )
+                  # Mantem o seek estritamente dentro do clip.
+                  t = duration * fraction
+                  t = min(max(t, 0.0), max(duration - 0.001, 0.0))
 
                   out = frames_dir / f"scene_{num:03d}_{idx}.jpg"
-
-                  subprocess.run([
-                      "ffmpeg", "-y",
-                      "-ss", f"{t:.3f}",
-                      "-i", str(clip),
-                      "-frames:v", "1",
-                      "-vf", "scale=320:-2",
-                      "-q:v", "3",
-                      str(out)
-                  ], check=True, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL)
-
+                  extract_frame(clip, t, out)
                   frame_paths.append(out)
 
               imgs = [
@@ -3286,7 +3320,7 @@ jobs:
           fi
 
           echo "========================================"
-          echo "V15.20 APP BACKEND VALIDADO"
+          echo "V15.21 VISION FRAME FIX VALIDADO"
           echo "Vision: OK"
           echo "Prompt opcional: OK"
           echo "Video sem narracao: suportado"
