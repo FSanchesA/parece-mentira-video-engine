@@ -585,9 +585,10 @@ jobs:
               compute_type="int8"
           )
 
-          segments, info = model.transcribe(
+                    segments, info = model.transcribe(
               "output/stage05/audio_whisper.wav",
-              language="pt",
+              language=None,
+              task="transcribe",
               beam_size=5,
               vad_filter=True,
               word_timestamps=True
@@ -948,6 +949,22 @@ jobs:
           ).read_text(
               encoding="utf-8"
           ).strip()
+          
+                    transcript_meta = json.loads(
+              Path(
+                  "output/stage05/transcript.json"
+              ).read_text(
+                  encoding="utf-8"
+              )
+          )
+
+          source_language = str(
+              transcript_meta.get("language") or "unknown"
+          ).strip().lower()
+
+          source_language_probability = float(
+              transcript_meta.get("language_probability") or 0
+          )
 
           total_duration = sum(
               float(s["duration"])
@@ -985,7 +1002,9 @@ jobs:
           - Modo solicitado: {user_mode}
           - Contexto fornecido pelo usuario:
             {user_context or "[nao informado]"}
-          - Transcricao original:
+          -           - Idioma detectado na fala original: {source_language}
+          - Confianca da deteccao de idioma: {source_language_probability:.3f}
+          - Transcricao original NO IDIOMA ORIGINAL:
             {original_transcript or "[sem narracao detectada]"}
 
           PRINCIPIO CENTRAL:
@@ -1174,6 +1193,25 @@ jobs:
               - qual assunto aquela cena suporta
               - onde ela pode entrar na timeline
               - qual trecho da nova narracao pode aparecer sobre ela
+
+                    26. IDIOMA E TRADUCAO DA NARRACAO.
+              TODA narracao nova gerada pelo diretor deve ser em PORTUGUES DO BRASIL.
+
+              Se o idioma original detectado for diferente de portugues:
+              - entenda e preserve o significado da fala original
+              - traduza/adapte a narracao para portugues do Brasil natural
+              - nao traduza nomes proprios sem necessidade
+              - nao altere fatos, numeros, datas ou relacoes causais
+              - nao invente informacao ausente
+              - mantenha o sentido da fala original e do contexto visual
+
+              IMPORTANTE SOBRE LEGENDA VISIVEL:
+              - se o video ja tiver legenda queimada em espanhol, ingles ou outro idioma,
+                essa legenda DEVE permanecer exatamente no idioma em que esta
+              - NAO traduza, cubra, remova ou substitua a legenda original visivel
+              - a narracao em portugues deve continuar semanticamente alinhada
+                ao texto estrangeiro que aparece na tela
+              - se o video nao tiver legenda visivel, NAO crie legenda nova nesta etapa
 
           RETORNE SOMENTE JSON VALIDO neste formato:
 
