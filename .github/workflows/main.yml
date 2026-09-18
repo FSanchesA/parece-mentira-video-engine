@@ -2537,15 +2537,51 @@ jobs:
           echo "Atempo aplicado: $TEMPO"
           echo "Duracao voz ajustada: $FITTED_AUDIO s"
 
-          if [ "$TOO_LONG" = "1" ]; then
-            echo "ERRO: narracao ainda maior que o master visual apos ajuste de ate 15%."
+                    if [ "$TOO_LONG" = "1" ]; then
+            echo "AVISO: narracao maior que a timeline visual gerada pela IA."
+            echo "Ativando fallback visual seguro com o Editorial Master completo."
             echo "Nao sera usado freeze frame."
-            echo "O plano precisa de menos texto ou mais tempo visual."
-            exit 1
+
+            SOURCE_DURATION=$(ffprobe \
+              -v error \
+              -show_entries format=duration \
+              -of default=noprint_wrappers=1:nokey=1 \
+              output/editorial_master.mp4)
+
+            CAN_FIT=$(awk \
+              -v a="$FITTED_AUDIO" \
+              -v s="$SOURCE_DURATION" \
+              'BEGIN { if (a <= s + 0.35) print 1; else print 0 }')
+
+            if [ "$CAN_FIT" = "1" ]; then
+              echo "Editorial Master disponivel: $SOURCE_DURATION s"
+              echo "Voz ajustada: $FITTED_AUDIO s"
+              echo "Fallback: preservando a ordem original do visual limpo para manter coerencia com as legendas."
+
+              cp \
+                output/editorial_master.mp4 \
+                output/stage07/ai_visual_master_fallback.mp4
+
+              VIDEO_DURATION="$FITTED_AUDIO"
+
+              echo "Fallback visual ativado com sucesso."
+            else
+              echo "ERRO: nem o Editorial Master completo comporta a narracao."
+              echo "Duracao fonte: $SOURCE_DURATION s"
+              echo "Duracao voz ajustada: $FITTED_AUDIO s"
+              echo "O plano precisa de narracao mais curta."
+              exit 1
+            fi
+          fi
+
+          VISUAL_INPUT="output/stage07/ai_visual_master.mp4"
+
+          if [ -s output/stage07/ai_visual_master_fallback.mp4 ]; then
+            VISUAL_INPUT="output/stage07/ai_visual_master_fallback.mp4"
           fi
 
           ffmpeg -y \
-            -i output/stage07/ai_visual_master.mp4 \
+            -i "$VISUAL_INPUT" \
             -i output/stage08/narration_master.m4a \
             -filter_complex "[1:a]apad[aout]" \
             -map 0:v:0 \
