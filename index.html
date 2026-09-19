@@ -47,14 +47,9 @@
   />
 </head>
 
-
 <body>
 
   <main class="app-shell">
-
-    <!-- =====================================================
-         CABEÇALHO
-    ====================================================== -->
 
     <header class="hero">
 
@@ -74,7 +69,6 @@
 
       </div>
 
-
       <div
         class="status-pill"
         id="apiStatus"
@@ -84,10 +78,6 @@
 
     </header>
 
-
-    <!-- =====================================================
-         ACESSO / APP KEY
-    ====================================================== -->
 
     <section
       class="card access-card hidden"
@@ -103,10 +93,9 @@
       </h2>
 
       <p class="muted access-help">
-        Digite a mesma APP_KEY que você salvou como segredo
-        no Cloudflare. Ela ficará apenas neste aparelho.
+        Digite a mesma APP_KEY salva no Cloudflare.
+        Ela ficará apenas neste aparelho.
       </p>
-
 
       <div class="access-row">
 
@@ -130,16 +119,7 @@
     </section>
 
 
-    <!-- =====================================================
-         CONFIGURAÇÃO DO VÍDEO
-    ====================================================== -->
-
     <section class="card">
-
-
-      <!-- ===================================================
-           UPLOAD
-      ==================================================== -->
 
       <label
         class="upload-box"
@@ -153,16 +133,13 @@
           hidden
         />
 
-
         <span class="upload-icon">
           ＋
         </span>
 
-
         <strong>
           Selecionar vídeo
         </strong>
-
 
         <small id="fileName">
           MP4, MOV ou vídeo do iPhone • até 100 MB
@@ -170,10 +147,6 @@
 
       </label>
 
-
-      <!-- ===================================================
-           CONTEXTO
-      ==================================================== -->
 
       <div class="field-group">
 
@@ -189,10 +162,6 @@
 
       </div>
 
-
-      <!-- ===================================================
-           NARRAÇÃO
-      ==================================================== -->
 
       <div class="field-group">
 
@@ -226,10 +195,6 @@
       </div>
 
 
-      <!-- ===================================================
-           TEMPO
-      ==================================================== -->
-
       <div class="field-group">
 
         <label for="tempo">
@@ -258,9 +223,37 @@
       </div>
 
 
-      <!-- ===================================================
-           PROCESSAMENTO
-      ==================================================== -->
+      <div class="field-group">
+
+        <label for="logoPosicao">
+          Posição da logo
+        </label>
+
+        <select id="logoPosicao">
+
+          <option
+            value="NORMAL"
+            selected
+          >
+            Normal
+          </option>
+
+          <option value="LATERAL">
+            Deslocar para os lados
+          </option>
+
+          <option value="VERTICAL">
+            Deslocar cima / baixo
+          </option>
+
+          <option value="LATERAL_VERTICAL">
+            Lados + cima / baixo
+          </option>
+
+        </select>
+
+      </div>
+
 
       <div class="field-group">
 
@@ -286,10 +279,6 @@
       </div>
 
 
-      <!-- ===================================================
-           BOTÃO EDITAR
-      ==================================================== -->
-
       <button
         class="primary"
         id="editBtn"
@@ -310,10 +299,6 @@
     </section>
 
 
-    <!-- =====================================================
-         PROCESSAMENTO
-    ====================================================== -->
-
     <section
       class="card hidden"
       id="progressCard"
@@ -332,7 +317,6 @@
           </h2>
 
         </div>
-
 
         <span id="progressPercent">
           0%
@@ -361,10 +345,6 @@
     </section>
 
 
-    <!-- =====================================================
-         RESULTADO FINAL
-    ====================================================== -->
-
     <section
       class="card hidden"
       id="resultCard"
@@ -378,13 +358,11 @@
         Vídeo pronto
       </h2>
 
-
       <video
         id="preview"
         controls
         playsinline
       ></video>
-
 
       <a
         class="primary link-btn"
@@ -398,14 +376,10 @@
     </section>
 
 
-    <!-- =====================================================
-         RODAPÉ
-    ====================================================== -->
-
     <footer>
 
       <span>
-        V3 mobile • PWA • backend conectado
+        V4 mobile • PWA • backend conectado
       </span>
 
     </footer>
@@ -413,11 +387,7 @@
   </main>
 
 
-  <!-- =======================================================
-       JAVASCRIPT
-  ======================================================== -->
-
-  <script src="app.js?v=4"></script>
+  <script src="app.js?v=5"></script>
 
 </body>
 
