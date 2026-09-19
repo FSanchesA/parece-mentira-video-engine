@@ -328,8 +328,8 @@ jobs:
             TOP_X="W-w-48"
             BOTTOM_X="48"
 
-            TOP_Y="409"
-            BOTTOM_Y="H-h-614"
+            TOP_Y="406"
+            BOTTOM_Y="H-h-611"
 
           fi
 
