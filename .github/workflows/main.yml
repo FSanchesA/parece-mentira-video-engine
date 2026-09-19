@@ -403,7 +403,7 @@ jobs:
             -filter_complex "\
             [0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1[base];\
             \
-            [1:v]scale=288:172,format=rgba,split=9[l1][l2][l3][l4][l5][l6][l7][l8][l9];\
+            [1:v]scale=288:176,format=rgba,split=9[l1][l2][l3][l4][l5][l6][l7][l8][l9];\
             \
             [l1]fade=t=out:st=8.95:d=0.55:alpha=1[top0];\
             [l2]fade=t=in:st=8.60:d=0.40:alpha=1,fade=t=out:st=17.95:d=0.55:alpha=1[bottom0];\
