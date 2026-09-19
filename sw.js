@@ -1,4 +1,5 @@
-const CACHE = "parece-mentira-v2";
+const CACHE = "parece-mentira-v3";
+
 const ASSETS = [
   "./",
   "index.html",
@@ -11,14 +12,18 @@ const ASSETS = [
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
+
   event.waitUntil(
-    caches.open(CACHE).then((cache) => cache.addAll(ASSETS))
+    caches
+      .open(CACHE)
+      .then((cache) => cache.addAll(ASSETS))
   );
 });
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys()
+    caches
+      .keys()
       .then((keys) =>
         Promise.all(
           keys
@@ -32,27 +37,60 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const request = event.request;
+  const url = new URL(request.url);
 
-  if (request.method !== "GET") return;
+  // IMPORTANTE:
+  // O Service Worker só controla arquivos do próprio GitHub Pages.
+  // Chamadas para o backend Cloudflare passam direto pela internet.
+  if (url.origin !== self.location.origin) {
+    return;
+  }
+
+  if (request.method !== "GET") {
+    return;
+  }
 
   if (request.mode === "navigate") {
     event.respondWith(
-      fetch(request).catch(() => caches.match("index.html"))
+      fetch(request)
+        .then((response) => {
+          const copy = response.clone();
+
+          caches
+            .open(CACHE)
+            .then((cache) =>
+              cache.put("index.html", copy)
+            );
+
+          return response;
+        })
+        .catch(() =>
+          caches.match("index.html")
+        )
     );
+
     return;
   }
 
   event.respondWith(
     caches.match(request).then((cached) => {
-      const network = fetch(request)
+      const networkRequest = fetch(request)
         .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE).then((cache) => cache.put(request, copy));
+          if (response && response.ok) {
+            const copy = response.clone();
+
+            caches
+              .open(CACHE)
+              .then((cache) =>
+                cache.put(request, copy)
+              );
+          }
+
           return response;
         })
         .catch(() => cached);
 
-      return cached || network;
+      return cached || networkRequest;
     })
   );
 });
