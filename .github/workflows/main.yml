@@ -328,6 +328,9 @@ jobs:
             TOP_X="W-w-48"
             BOTTOM_X="48"
 
+            TOP_Y="412"
+            BOTTOM_Y="H-h-617"
+
           fi
 
 
@@ -400,7 +403,7 @@ jobs:
             -filter_complex "\
             [0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1[base];\
             \
-            [1:v]scale=270:160,format=rgba,split=9[l1][l2][l3][l4][l5][l6][l7][l8][l9];\
+            [1:v]scale=280:166,format=rgba,split=9[l1][l2][l3][l4][l5][l6][l7][l8][l9];\
             \
             [l1]fade=t=out:st=8.95:d=0.55:alpha=1[top0];\
             [l2]fade=t=in:st=8.60:d=0.40:alpha=1,fade=t=out:st=17.95:d=0.55:alpha=1[bottom0];\
@@ -3820,6 +3823,9 @@ jobs:
       - name: Stage 08 - Montar Texto Continuo
         shell: bash
 
+        env:
+          USER_MODE: ${{ inputs.modo }}
+
         run: |
           set -e
 
@@ -3828,6 +3834,7 @@ jobs:
 
           python3 - <<'PY'
           import json
+          import os
           from pathlib import Path
 
 
@@ -3840,21 +3847,19 @@ jobs:
           )
 
 
-          mode = plan.get(
-              "mode_used",
-              "AUTO"
-          )
-
+          user_mode = os.getenv(
+               "USER_MODE",
+               "AUTO"
+          ).strip().upper()
 
           timeline = plan.get(
               "timeline",
               []
           )
 
+          if user_mode == "SEM_NARRACAO":
 
-          if mode == "SEM_NARRACAO":
-
-              text = ""
+          text = ""
 
 
           else:
