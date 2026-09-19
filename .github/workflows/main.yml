@@ -3821,7 +3821,6 @@ jobs:
 
 
       - name: Stage 08 - Montar Texto Continuo
-              - name: Stage 08 - Montar Texto Continuo
         shell: bash
 
         env:
