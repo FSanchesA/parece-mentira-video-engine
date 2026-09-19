@@ -1,13 +1,17 @@
-name: Parece Mentira - Video Engine V15.21 Vision Frame Fix
+name: Parece Mentira - Video Engine V15.24 Tempo Control
+
 run-name: ${{ inputs.app_job_tag != '' && format('APP {0}', inputs.app_job_tag) || 'Execucao manual' }}
+
 on:
   workflow_dispatch:
     inputs:
+
       contexto:
         description: "Contexto do episodio (opcional)"
         required: false
         type: string
         default: ""
+
       etapa:
         description: "Etapa do processamento"
         required: true
@@ -16,6 +20,7 @@ on:
         options:
           - COMPLETO_IA
           - ACABAMENTO_SEM_IA
+
       modo:
         description: "Modo de narracao"
         required: true
@@ -27,39 +32,62 @@ on:
           - NOVA
           - SEM_NARRACAO
           - PLANO_MANUAL
+
+      tempo:
+        description: "Controle de duracao"
+        required: true
+        type: choice
+        default: "AUTO"
+        options:
+          - AUTO
+          - SHORT_CURTO
+          - PRESERVAR
+
       app_job_tag:
         description: "Tag do job criado pelo app"
         required: false
         type: string
         default: ""
+
       app_release_id:
         description: "Release ID do job criado pelo app"
         required: false
         type: string
         default: ""
+
       app_source_asset_id:
         description: "Asset ID do video enviado pelo app"
         required: false
         type: string
         default: ""
+
       app_source_filename:
         description: "Nome do video enviado pelo app"
         required: false
         type: string
         default: ""
+
+
 permissions:
   contents: write
   actions: read
+
 
 concurrency:
   group: parece-mentira-video-engine
   cancel-in-progress: true
 
+
 jobs:
+
   render-video:
+
     runs-on: ubuntu-latest
+
     timeout-minutes: 60
+
     steps:
+
 
       # =========================================================
       # SETUP
@@ -68,22 +96,26 @@ jobs:
       - name: Baixar repositorio
         uses: actions/checkout@v4
 
+
       - name: Instalar FFmpeg
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg python3-pip
 
+
       # =========================================================
-      # APP - BAIXAR VIDEO TEMPORARIO DA RELEASE
+      # APP - BAIXAR VIDEO TEMPORARIO
       # =========================================================
 
       - name: App - Baixar video enviado
         if: ${{ inputs.app_source_asset_id != '' }}
         shell: bash
+
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_ASSET_ID: ${{ inputs.app_source_asset_id }}
           SOURCE_FILENAME: ${{ inputs.app_source_filename }}
+
         run: |
           set -e
 
@@ -112,6 +144,7 @@ jobs:
 
           echo "VIDEO DO APP BAIXADO: app_input/$SAFE_NAME"
 
+
       # =========================================================
       # LOCALIZAR ARQUIVOS
       # =========================================================
@@ -122,8 +155,11 @@ jobs:
           set -e
 
           if [ -n "${APP_VIDEO:-}" ] && [ -s "$APP_VIDEO" ]; then
+
             VIDEO="$APP_VIDEO"
+
           else
+
             VIDEO=$(find . \
               -maxdepth 2 \
               -type f \
@@ -131,6 +167,7 @@ jobs:
               ! -path "./output/*" \
               ! -path "./app_input/*" \
               | head -1)
+
           fi
 
           if [ -z "$VIDEO" ]; then
@@ -149,7 +186,9 @@ jobs:
           echo "ARQUIVOS LOCALIZADOS"
           echo "Video: $VIDEO"
           echo "Logo: ./logo_parece_mentira.png"
+          echo "Tempo solicitado: ${{ inputs.tempo }}"
           echo "========================================"
+
 
       # =========================================================
       # ANALISE DO VIDEO
@@ -157,6 +196,10 @@ jobs:
 
       - name: Analisar video original
         shell: bash
+
+        env:
+          USER_TEMPO: ${{ inputs.tempo }}
+
         run: |
           set -e
 
@@ -174,15 +217,58 @@ jobs:
           fi
 
           FINAL_START=$(awk -v d="$DURATION" 'BEGIN { printf "%.3f", d-5.0 }')
+
           FINAL_FULL=$(awk -v d="$DURATION" 'BEGIN { printf "%.3f", d-4.0 }')
+
           SMALL_FADE_START=$(awk -v d="$DURATION" 'BEGIN { printf "%.3f", d-4.0 }')
+
           SMALL_FADE_END=$(awk -v d="$DURATION" 'BEGIN { printf "%.3f", d-3.0 }')
+
+
+          # -----------------------------------------------------
+          # FAIXAS DE DURACAO
+          # -----------------------------------------------------
+
+          if [ "$USER_TEMPO" = "PRESERVAR" ]; then
+
+            TARGET_MIN=$(awk -v d="$DURATION" \
+              'BEGIN { printf "%.3f", d*0.90 }')
+
+            TARGET_MAX=$(awk -v d="$DURATION" \
+              'BEGIN { printf "%.3f", d }')
+
+          elif [ "$USER_TEMPO" = "SHORT_CURTO" ]; then
+
+            TARGET_MIN=$(awk -v d="$DURATION" '
+              BEGIN {
+                if (d < 10.0) printf "%.3f", d;
+                else printf "%.3f", 10.0
+              }')
+
+            TARGET_MAX=$(awk -v d="$DURATION" '
+              BEGIN {
+                if (d < 20.0) printf "%.3f", d;
+                else printf "%.3f", 20.0
+              }')
+
+          else
+
+            TARGET_MIN="0.000"
+
+            TARGET_MAX="$DURATION"
+
+          fi
+
 
           echo "DURATION=$DURATION" >> "$GITHUB_ENV"
           echo "FINAL_START=$FINAL_START" >> "$GITHUB_ENV"
           echo "FINAL_FULL=$FINAL_FULL" >> "$GITHUB_ENV"
           echo "SMALL_FADE_START=$SMALL_FADE_START" >> "$GITHUB_ENV"
           echo "SMALL_FADE_END=$SMALL_FADE_END" >> "$GITHUB_ENV"
+
+          echo "TARGET_MIN=$TARGET_MIN" >> "$GITHUB_ENV"
+          echo "TARGET_MAX=$TARGET_MAX" >> "$GITHUB_ENV"
+
 
           ffprobe \
             -v error \
@@ -192,15 +278,23 @@ jobs:
             "$VIDEO" \
             > output/source_report.txt
 
-          echo "Duracao: $DURATION"
+
+          echo "========================================"
+          echo "VIDEO ORIGINAL"
+          echo "Duracao: $DURATION s"
+          echo "Modo de tempo: $USER_TEMPO"
+          echo "Faixa alvo: $TARGET_MIN - $TARGET_MAX s"
+          echo "========================================"
+
 
       # =========================================================
       # STAGE 01 - SOURCE BRANDING
-      # CONGELADO / APROVADO
+      # APROVADO
       # =========================================================
 
       - name: Stage 01 - Branding Ajustado Final
         shell: bash
+
         run: |
           set -e
 
@@ -252,12 +346,14 @@ jobs:
             -movflags +faststart \
             output/clean_master.mp4
 
+
       # =========================================================
       # VALIDAR STAGE 01
       # =========================================================
 
       - name: Validar Stage 01
         shell: bash
+
         run: |
           set -e
 
@@ -284,12 +380,14 @@ jobs:
 
           echo "STAGE 01 VALIDADO."
 
+
       # =========================================================
       # STAGE 02 - EDITORIAL MASTER
       # =========================================================
 
       - name: Stage 02 - Criar Editorial Master
         shell: bash
+
         run: |
           set -e
 
@@ -304,8 +402,10 @@ jobs:
             -movflags +faststart \
             output/editorial_master.mp4
 
+
       - name: Validar Stage 02
         shell: bash
+
         run: |
           set -e
 
@@ -334,12 +434,14 @@ jobs:
 
           echo "STAGE 02 VALIDADO."
 
+
       # =========================================================
       # STAGE 03 - DETECCAO DE CENAS
       # =========================================================
 
       - name: Stage 03 - Detectar Cenas
         shell: bash
+
         run: |
           set -e
 
@@ -375,12 +477,14 @@ jobs:
 
           cat output/scene_report.txt
 
+
       # =========================================================
       # STAGE 03 - PREVIEWS
       # =========================================================
 
       - name: Stage 03 - Gerar Previews
         shell: bash
+
         run: |
           set -e
 
@@ -409,12 +513,14 @@ jobs:
 
           done < output/scene_report.txt
 
+
       # =========================================================
       # STAGE 04 - SCENE CUTTER
       # =========================================================
 
       - name: Stage 04 - Criar Clips de Cena
         shell: bash
+
         run: |
           set -e
 
@@ -492,24 +598,24 @@ jobs:
 
           echo "STAGE 04 OK - Cenas: $CREATED"
 
+
       # =========================================================
       # STAGE 05 - TRANSCRICAO / ENTENDIMENTO
-      #
-      # Agora suporta:
-      # - video com narracao
-      # - video sem narracao
-      # - video apenas visual / com legenda embutida
       # =========================================================
 
       - name: Stage 05 - Instalar Whisper
         shell: bash
+
         run: |
           set -e
+
           python3 -m pip install --upgrade pip
           python3 -m pip install faster-whisper pillow
 
+
       - name: Stage 05 - Detectar Audio
         shell: bash
+
         run: |
           set -e
 
@@ -524,6 +630,7 @@ jobs:
             | wc -l)
 
           if [ "$AUDIO_COUNT" -gt 0 ]; then
+
             echo "HAS_AUDIO=1" >> "$GITHUB_ENV"
 
             ffmpeg -y \
@@ -533,22 +640,26 @@ jobs:
               -ar 16000 \
               -c:a pcm_s16le \
               output/stage05/audio_whisper.wav
+
           else
+
             echo "HAS_AUDIO=0" >> "$GITHUB_ENV"
 
-            # Arquivo de silencio apenas para manter o pipeline uniforme.
             ffmpeg -y \
               -f lavfi \
               -i anullsrc=r=16000:cl=mono \
               -t 1 \
               -c:a pcm_s16le \
               output/stage05/audio_whisper.wav
+
           fi
 
           test -s output/stage05/audio_whisper.wav
 
+
       - name: Stage 05 - Transcrever quando houver fala
         shell: bash
+
         run: |
           set -e
 
@@ -570,11 +681,23 @@ jobs:
               }
 
               out_json.write_text(
-                  json.dumps(result, ensure_ascii=False, indent=2),
+                  json.dumps(
+                      result,
+                      ensure_ascii=False,
+                      indent=2
+                  ),
                   encoding="utf-8"
               )
-              out_txt.write_text("", encoding="utf-8")
-              print("Video sem audio: transcricao vazia criada.")
+
+              out_txt.write_text(
+                  "",
+                  encoding="utf-8"
+              )
+
+              print(
+                  "Video sem audio: transcricao vazia criada."
+              )
+
               raise SystemExit(0)
 
           from faster_whisper import WhisperModel
@@ -623,10 +746,16 @@ jobs:
               result["segments"].append(item)
 
               if segment.text.strip():
-                  full_text.append(segment.text.strip())
+                  full_text.append(
+                      segment.text.strip()
+                  )
 
           out_json.write_text(
-              json.dumps(result, ensure_ascii=False, indent=2),
+              json.dumps(
+                  result,
+                  ensure_ascii=False,
+                  indent=2
+              ),
               encoding="utf-8"
           )
 
@@ -643,8 +772,10 @@ jobs:
           test -s output/stage05/transcript.json
           test -f output/stage05/transcript.txt
 
+
       - name: Stage 05 - Criar Manifesto de Cenas
         shell: bash
+
         run: |
           set -e
 
@@ -654,11 +785,18 @@ jobs:
           from pathlib import Path
 
           transcript = json.loads(
-              Path("output/stage05/transcript.json")
-              .read_text(encoding="utf-8")
+              Path(
+                  "output/stage05/transcript.json"
+              ).read_text(
+                  encoding="utf-8"
+              )
           )
 
-          segments = transcript.get("segments", [])
+          segments = transcript.get(
+              "segments",
+              []
+          )
+
           scenes = []
 
           with open(
@@ -666,17 +804,26 @@ jobs:
               "r",
               encoding="utf-8"
           ) as f:
+
               reader = csv.DictReader(f)
 
               for row in reader:
-                  start = float(row["start"])
-                  end = float(row["end"])
+
+                  start = float(
+                      row["start"]
+                  )
+
+                  end = float(
+                      row["end"]
+                  )
 
                   scene_segments = []
 
                   for seg in segments:
+
                       midpoint = (
-                          float(seg["start"]) + float(seg["end"])
+                          float(seg["start"]) +
+                          float(seg["end"])
                       ) / 2
 
                       if start <= midpoint < end:
@@ -685,7 +832,10 @@ jobs:
                   scene_text = " ".join(
                       s["text"].strip()
                       for s in scene_segments
-                      if s.get("text", "").strip()
+                      if s.get(
+                          "text",
+                          ""
+                      ).strip()
                   ).strip()
 
                   scenes.append({
@@ -714,7 +864,9 @@ jobs:
               "w",
               encoding="utf-8"
           ) as f:
+
               for scene in scenes:
+
                   f.write(
                       f"CENA {scene['scene']:03d}\n"
                       f"Inicio: {scene['start']:.3f}s\n"
@@ -724,7 +876,9 @@ jobs:
                       "----------------------------------------\n"
                   )
 
-          print(f"Manifesto criado: {len(scenes)} cenas")
+          print(
+              f"Manifesto criado: {len(scenes)} cenas"
+          )
           PY
 
           python3 /tmp/build_manifest_v15.py
@@ -732,18 +886,14 @@ jobs:
           test -s output/stage05/scene_manifest.json
           test -s output/stage05/scene_manifest.txt
 
+
       # =========================================================
       # STAGE 06 - VISION PACK
-      #
-      # Gera uma folha visual por cena com 3 momentos:
-      # 20%, 50% e 80%.
-      #
-      # Isso permite ao modelo multimodal entender o que realmente
-      # aparece em cada cena, inclusive videos sem narracao.
       # =========================================================
 
       - name: Stage 06 - Criar Contact Sheets
         shell: bash
+
         run: |
           set -e
 
@@ -754,160 +904,298 @@ jobs:
           import json
           import subprocess
           from pathlib import Path
-          from PIL import Image, ImageOps, ImageDraw, ImageFont
 
-          manifest = json.loads(
-              Path("output/stage05/scene_manifest.json")
-              .read_text(encoding="utf-8")
+          from PIL import (
+              Image,
+              ImageOps,
+              ImageDraw,
+              ImageFont
           )
 
-          frames_dir = Path("output/stage06_vision/frames")
-          sheets_dir = Path("output/stage06_vision/sheets")
+          manifest = json.loads(
+              Path(
+                  "output/stage05/scene_manifest.json"
+              ).read_text(
+                  encoding="utf-8"
+              )
+          )
+
+          frames_dir = Path(
+              "output/stage06_vision/frames"
+          )
+
+          sheets_dir = Path(
+              "output/stage06_vision/sheets"
+          )
 
           def get_font(size):
+
               candidates = [
                   "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
                   "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf"
               ]
+
               for p in candidates:
+
                   if Path(p).exists():
-                      return ImageFont.truetype(p, size=size)
+                      return ImageFont.truetype(
+                          p,
+                          size=size
+                      )
+
               return ImageFont.load_default()
 
           font = get_font(28)
 
           def probe_duration(path):
-              result = subprocess.run([
-                  "ffprobe", "-v", "error",
-                  "-show_entries", "format=duration",
-                  "-of", "default=noprint_wrappers=1:nokey=1",
-                  str(path)
-              ], check=True, capture_output=True, text=True)
-              return max(float(result.stdout.strip() or 0), 0.001)
 
-          def extract_frame(clip, t, out):
-              # Primeiro tenta o ponto solicitado. Em cenas extremamente curtas,
-              # o FFmpeg pode terminar sem erro e ainda assim nao gerar imagem.
-              subprocess.run([
-                  "ffmpeg", "-y",
-                  "-ss", f"{t:.6f}",
-                  "-i", str(clip),
-                  "-frames:v", "1",
-                  "-vf", "scale=320:-2",
-                  "-q:v", "3",
-                  str(out)
-              ], check=False, stdout=subprocess.DEVNULL,
-                 stderr=subprocess.DEVNULL)
+              result = subprocess.run(
+                  [
+                      "ffprobe",
+                      "-v",
+                      "error",
+                      "-show_entries",
+                      "format=duration",
+                      "-of",
+                      "default=noprint_wrappers=1:nokey=1",
+                      str(path)
+                  ],
+                  check=True,
+                  capture_output=True,
+                  text=True
+              )
 
-              if out.exists() and out.stat().st_size > 0:
+              return max(
+                  float(
+                      result.stdout.strip() or 0
+                  ),
+                  0.001
+              )
+
+          def extract_frame(
+              clip,
+              t,
+              out
+          ):
+
+              subprocess.run(
+                  [
+                      "ffmpeg",
+                      "-y",
+                      "-ss",
+                      f"{t:.6f}",
+                      "-i",
+                      str(clip),
+                      "-frames:v",
+                      "1",
+                      "-vf",
+                      "scale=320:-2",
+                      "-q:v",
+                      "3",
+                      str(out)
+                  ],
+                  check=False,
+                  stdout=subprocess.DEVNULL,
+                  stderr=subprocess.DEVNULL
+              )
+
+              if (
+                  out.exists() and
+                  out.stat().st_size > 0
+              ):
                   return
 
-              # Fallback robusto: primeiro frame real do clip.
-              subprocess.run([
-                  "ffmpeg", "-y",
-                  "-i", str(clip),
-                  "-frames:v", "1",
-                  "-vf", "scale=320:-2",
-                  "-q:v", "3",
-                  str(out)
-              ], check=True, stdout=subprocess.DEVNULL,
-                 stderr=subprocess.DEVNULL)
+              subprocess.run(
+                  [
+                      "ffmpeg",
+                      "-y",
+                      "-i",
+                      str(clip),
+                      "-frames:v",
+                      "1",
+                      "-vf",
+                      "scale=320:-2",
+                      "-q:v",
+                      "3",
+                      str(out)
+                  ],
+                  check=True,
+                  stdout=subprocess.DEVNULL,
+                  stderr=subprocess.DEVNULL
+              )
 
-              if not out.exists() or out.stat().st_size <= 0:
-                  raise RuntimeError(f"Nao foi possivel extrair frame de {clip}")
+              if (
+                  not out.exists() or
+                  out.stat().st_size <= 0
+              ):
+
+                  raise RuntimeError(
+                      f"Nao foi possivel extrair frame de {clip}"
+                  )
 
           for scene in manifest:
-              num = int(scene["scene"])
-              clip = Path("output/stage04_clips") / f"scene_{num:03d}.mp4"
 
-              if not clip.exists() or clip.stat().st_size <= 0:
-                  raise FileNotFoundError(f"Clip ausente ou vazio: {clip}")
+              num = int(
+                  scene["scene"]
+              )
 
-              # Usa a duracao REAL do arquivo. Nao infla cenas curtas para 0.3 s,
-              # pois isso fazia os seeks cairem depois do fim do clip.
-              duration = probe_duration(clip)
+              clip = Path(
+                  "output/stage04_clips"
+              ) / f"scene_{num:03d}.mp4"
+
+              if (
+                  not clip.exists() or
+                  clip.stat().st_size <= 0
+              ):
+
+                  raise FileNotFoundError(
+                      f"Clip ausente ou vazio: {clip}"
+                  )
+
+              duration = probe_duration(
+                  clip
+              )
 
               frame_paths = []
 
-              for idx, fraction in enumerate((0.20, 0.50, 0.80), start=1):
-                  # Mantem o seek estritamente dentro do clip.
-                  t = duration * fraction
-                  t = min(max(t, 0.0), max(duration - 0.001, 0.0))
+              for idx, fraction in enumerate(
+                  (
+                      0.20,
+                      0.50,
+                      0.80
+                  ),
+                  start=1
+              ):
 
-                  out = frames_dir / f"scene_{num:03d}_{idx}.jpg"
-                  extract_frame(clip, t, out)
-                  frame_paths.append(out)
+                  t = duration * fraction
+
+                  t = min(
+                      max(
+                          t,
+                          0.0
+                      ),
+                      max(
+                          duration - 0.001,
+                          0.0
+                      )
+                  )
+
+                  out = frames_dir / (
+                      f"scene_{num:03d}_{idx}.jpg"
+                  )
+
+                  extract_frame(
+                      clip,
+                      t,
+                      out
+                  )
+
+                  frame_paths.append(
+                      out
+                  )
 
               imgs = [
                   Image.open(p).convert("RGB")
                   for p in frame_paths
               ]
 
-              height = max(im.height for im in imgs)
+              height = max(
+                  im.height
+                  for im in imgs
+              )
+
               canvas = Image.new(
                   "RGB",
-                  (320 * 3, height + 56),
+                  (
+                      320 * 3,
+                      height + 56
+                  ),
                   "white"
               )
 
               for i, im in enumerate(imgs):
+
                   if im.height != height:
+
                       im = ImageOps.pad(
                           im,
-                          (320, height),
+                          (
+                              320,
+                              height
+                          ),
                           color="black"
                       )
 
-                  canvas.paste(im, (i * 320, 56))
+                  canvas.paste(
+                      im,
+                      (
+                          i * 320,
+                          56
+                      )
+                  )
 
-              draw = ImageDraw.Draw(canvas)
+              draw = ImageDraw.Draw(
+                  canvas
+              )
+
               draw.text(
-                  (18, 12),
+                  (
+                      18,
+                      12
+                  ),
                   f"CENA {num:03d} | {duration:.1f}s",
                   fill="black",
                   font=font
               )
 
-              sheet = sheets_dir / f"scene_{num:03d}.jpg"
-              canvas.save(sheet, "JPEG", quality=82)
+              sheet = sheets_dir / (
+                  f"scene_{num:03d}.jpg"
+              )
 
-          print("Contact sheets criadas.")
+              canvas.save(
+                  sheet,
+                  "JPEG",
+                  quality=82
+              )
+
+          print(
+              "Contact sheets criadas."
+          )
           PY
 
           python3 /tmp/contact_sheets.py
 
           test "$(find output/stage06_vision/sheets -name 'scene_*.jpg' | wc -l)" -gt 0
 
+
       # =========================================================
-      # STAGE 06 - AI DIRECTOR MULTIMODAL - GEMINI
-      #
-      # Requer secret no GitHub:
-      # GEMINI_API_KEY
-      #
-      # Usa Gemini 3.8 Flash no Free Tier recorrente,
-      # sujeito aos limites de uso definidos pelo Google.
+      # STAGE 06 - GEMINI
       # =========================================================
 
       - name: Stage 06 - Instalar Gemini SDK
         if: ${{ inputs.etapa != 'ACABAMENTO_SEM_IA' && inputs.modo != 'PLANO_MANUAL' }}
         shell: bash
+
         run: |
           set -e
           python3 -m pip install --upgrade google-genai
 
+
       - name: Stage 06 - AI Director Gemini
         if: ${{ inputs.etapa != 'ACABAMENTO_SEM_IA' && inputs.modo != 'PLANO_MANUAL' }}
         shell: bash
+
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           USER_CONTEXT: ${{ inputs.contexto }}
           USER_MODE: ${{ inputs.modo }}
+          USER_TEMPO: ${{ inputs.tempo }}
+
         run: |
           set -e
 
           if [ -z "$GEMINI_API_KEY" ]; then
             echo "ERRO: secret GEMINI_API_KEY nao configurado."
-            echo "GitHub > Settings > Secrets and variables > Actions"
             exit 1
           fi
 
@@ -917,13 +1205,22 @@ jobs:
           import json
           import os
           import re
+          import time
+
           from pathlib import Path
 
           from google import genai
           from google.genai import types
 
+
+          # =====================================================
+          # CONFIG
+          # =====================================================
+
           client = genai.Client(
-              api_key=os.environ["GEMINI_API_KEY"]
+              api_key=os.environ[
+                  "GEMINI_API_KEY"
+              ]
           )
 
           user_context = os.getenv(
@@ -934,7 +1231,17 @@ jobs:
           user_mode = os.getenv(
               "USER_MODE",
               "AUTO"
-          ).strip()
+          ).strip().upper()
+
+          user_tempo = os.getenv(
+              "USER_TEMPO",
+              "AUTO"
+          ).strip().upper()
+
+
+          # =====================================================
+          # DADOS DO VIDEO
+          # =====================================================
 
           manifest = json.loads(
               Path(
@@ -959,271 +1266,533 @@ jobs:
           )
 
           source_language = str(
-              transcript_meta.get("language") or "unknown"
+              transcript_meta.get(
+                  "language"
+              ) or "unknown"
           ).strip().lower()
 
           source_language_probability = float(
-              transcript_meta.get("language_probability") or 0
+              transcript_meta.get(
+                  "language_probability"
+              ) or 0
           )
 
           total_duration = sum(
-              float(s["duration"])
+              float(
+                  s["duration"]
+              )
               for s in manifest
           )
 
-          narration_target = max(
-              total_duration - 2.0,
-              8.0
-          )
+
+          # =====================================================
+          # REGRA DE TEMPO
+          # =====================================================
+
+          if user_tempo == "SHORT_CURTO":
+
+              target_min = min(
+                  10.0,
+                  total_duration
+              )
+
+              target_max = min(
+                  20.0,
+                  total_duration
+              )
+
+              narration_target = max(
+                  target_max - 1.0,
+                  3.0
+              )
+
+              tempo_instruction = f"""
+              MODO DE DURACAO: SHORT_CURTO.
+
+              ESTA REGRA TEM PRIORIDADE SOBRE QUALQUER OUTRA REGRA DE RITMO.
+
+              O video final PRECISA ficar entre:
+              {target_min:.2f} e {target_max:.2f} segundos.
+
+              O objetivo e produzir um Short muito curto e forte.
+
+              Voce DEVE:
+              - selecionar apenas os momentos essenciais
+              - cortar repeticoes
+              - criar gancho imediato
+              - manter apenas informacao indispensavel
+              - fazer a narracao caber confortavelmente nesse tempo
+              - encerrar dentro de no maximo {target_max:.2f}s
+
+              NAO entregue timeline acima de {target_max:.2f}s.
+              """
+
+          elif user_tempo == "PRESERVAR":
+
+              target_min = (
+                  total_duration *
+                  0.90
+              )
+
+              target_max = (
+                  total_duration
+              )
+
+              narration_target = max(
+                  target_max - 2.0,
+                  8.0
+              )
+
+              tempo_instruction = f"""
+              MODO DE DURACAO: PRESERVAR.
+
+              ESTA REGRA TEM PRIORIDADE ABSOLUTA SOBRE A REGRA
+              DE "VIDEO MAIS CURTO E COESO".
+
+              O usuario pediu explicitamente para preservar
+              aproximadamente a duracao do video original.
+
+              O video original possui aproximadamente:
+              {total_duration:.2f} segundos.
+
+              O video final PRECISA ficar entre:
+              {target_min:.2f} e {target_max:.2f} segundos.
+
+              Voce PODE:
+              - reorganizar quando houver ganho real
+              - fazer pequenos cortes internos
+              - remover apenas trechos realmente dispensaveis
+              - melhorar ritmo
+              - criar narracao
+              - usar incremento se realmente necessario
+
+              Voce NAO PODE:
+              - resumir drasticamente o video
+              - transformar 60 segundos em 20 segundos
+              - remover grandes blocos apenas porque prefere ritmo rapido
+              - entregar menos de 90% da duracao original
+
+              Neste modo, PRESERVAR A DURACAO e uma ordem do usuario,
+              nao uma sugestao editorial.
+
+              Se uma cena longa for necessaria para atingir a faixa,
+              ela PODE permanecer longa.
+
+              A regra geral de evitar cenas acima de 8 segundos
+              NAO se aplica obrigatoriamente neste modo.
+
+              Antes de responder, some TODAS as duracoes da timeline.
+
+              A soma final deve ser no minimo:
+              {target_min:.2f}s
+
+              e no maximo:
+              {target_max:.2f}s.
+              """
+
+          else:
+
+              target_min = 0.0
+
+              target_max = total_duration
+
+              narration_target = max(
+                  total_duration - 2.0,
+                  8.0
+              )
+
+              tempo_instruction = """
+              MODO DE DURACAO: AUTO.
+
+              Use a liberdade editorial normal.
+
+              O video pode terminar antes da duracao original
+              se isso melhorar o ritmo e a coerencia.
+              """
+
 
           target_words = max(
-              20,
-              int(narration_target * 2.15)
+              10,
+              int(
+                  narration_target *
+                  2.05
+              )
           )
 
-          instructions = f"""
-          Voce e o DIRETOR EDITORIAL MULTIMODAL do canal PARECE MENTIRA.
 
-          Sua tarefa NAO e simplesmente reescrever a narracao original.
-          Sua tarefa e EDITAR a historia de forma audiovisual.
+          # =====================================================
+          # PROMPT
+          # =====================================================
+
+          instructions = f"""
+          Voce e o DIRETOR EDITORIAL MULTIMODAL
+          do canal PARECE MENTIRA.
+
+          Sua tarefa NAO e simplesmente reescrever
+          a narracao original.
+
+          Sua tarefa e EDITAR a historia
+          de forma audiovisual.
 
           Pense como editor de video curto:
           - cada corte precisa ter funcao narrativa
           - a imagem precisa mudar quando a ideia muda
           - cenas repetitivas devem ser reduzidas
-          - nao use todas as cenas apenas porque existem
-          - nao deixe uma unica tomada longa dominar o video
-          - evite sensacao de slideshow lento ou de voz apenas colocada sobre o original
+          - nao use cenas apenas porque existem
+          - preserve coerencia entre imagem, legenda e narracao
+
 
           DADOS DO EPISODIO:
-          - Duracao visual disponivel: {total_duration:.2f}s
-          - Duracao alvo maxima de narracao: {narration_target:.2f}s
-          - Alvo aproximado de palavras: no maximo {target_words}
-          - Modo solicitado: {user_mode}
+
+          - Duracao visual disponivel:
+            {total_duration:.2f}s
+
+          - Modo de narracao:
+            {user_mode}
+
+          - Controle de tempo:
+            {user_tempo}
+
+          - Duracao alvo da narracao:
+            ate aproximadamente {narration_target:.2f}s
+
+          - Alvo aproximado maximo de palavras:
+            {target_words}
+
           - Contexto fornecido pelo usuario:
             {user_context or "[nao informado]"}
-          - Idioma detectado na fala original: {source_language}
-          - Confianca da deteccao de idioma: {source_language_probability:.3f}
-          - Transcricao original NO IDIOMA ORIGINAL:
+
+          - Idioma detectado:
+            {source_language}
+
+          - Confianca:
+            {source_language_probability:.3f}
+
+          - Transcricao original:
             {original_transcript or "[sem narracao detectada]"}
 
-          PRINCIPIO CENTRAL:
+
+          ======================================================
+          REGRA ESPECIAL DE DURACAO
+          ======================================================
+
+          {tempo_instruction}
+
+
+          ======================================================
+          PRINCIPIO CENTRAL
+          ======================================================
+
           VIDEO E NARRACAO DEVEM SER PLANEJADOS JUNTOS.
+
           Nao monte primeiro o video e depois encaixe a voz.
+
           Nao escreva primeiro toda a fala para depois procurar imagens.
 
-          REGRAS OBRIGATORIAS:
+
+          ======================================================
+          REGRAS OBRIGATORIAS
+          ======================================================
 
           1. LEIA O VIDEO VISUALMENTE.
-             Cada cena vem com uma contact sheet de tres momentos.
-             Use as imagens para identificar:
-             - assunto da cena
-             - acao principal
-             - mudanca de enquadramento
-             - repeticao visual
-             - potencial emocional
-             - melhor momento para fala associada
 
-          2. NAO USE TODAS AS CENAS POR OBRIGACAO.
-             Se uma cena nao acrescentar informacao, ritmo, emocao ou continuidade,
-             OMITA.
-             Um bom corte e melhor que preencher tempo.
+             Cada cena vem com uma contact sheet
+             de tres momentos.
+
+             Use as imagens para identificar:
+             - assunto
+             - acao
+             - enquadramento
+             - repeticao
+             - potencial emocional
+             - texto visivel
+             - legenda embutida
+
+
+          2. CENAS REPETITIVAS.
+
+             No modo AUTO ou SHORT_CURTO,
+             cenas que nao acrescentam informacao,
+             ritmo, emocao ou continuidade podem ser omitidas.
+
+             No modo PRESERVAR,
+             remova apenas material realmente dispensavel,
+             pois a duracao final precisa permanecer entre
+             90% e 100% do original.
+
 
           3. CONTROLE DE REPETICAO VISUAL.
-             Se duas cenas mostram praticamente a mesma coisa:
-             - use apenas a melhor
+
+             Se duas cenas mostram praticamente
+             a mesma coisa:
+
+             - use a melhor
              OU
-             - use trechos curtos de cada uma
+             - use trechos de cada uma
              OU
-             - intercale com outro elemento relevante.
-             Nunca mantenha repeticao apenas para ocupar tempo.
+             - mantenha ambas se PRESERVAR exigir continuidade
+               e elas fizerem parte natural do video.
+
 
           4. LIMITE DE TOMADA CONTINUA.
-             Evite deixar uma unica cena por tempo excessivo.
-             Como regra editorial:
-             - cenas comuns: idealmente 2.0 a 6.5 segundos
-             - cenas fortes ou de acao: podem chegar a 8 segundos
-             - acima de 8 segundos so se houver motivo visual muito claro
-             - cenas acima de 10 segundos devem ser fortemente evitadas
+
+             AUTO e SHORT_CURTO:
+             - cenas comuns: 2.0 a 6.5 segundos
+             - cenas fortes: ate 8 segundos
+             - acima de 10 segundos: evitar
+
+             PRESERVAR:
+             - cenas podem ultrapassar 8 segundos
+               quando necessario
+             - nao corte uma cena longa apenas para obedecer
+               ao limite editorial de 8 segundos
+
 
           5. IDEIA NOVA = POSSIVEL MUDANCA VISUAL.
-             Quando a narracao muda de assunto, procure uma imagem coerente com
-             essa nova ideia.
-             Nao deixe a mesma imagem atravessar varios blocos narrativos sem motivo.
+
+             Quando a narracao muda de assunto,
+             procure imagem coerente.
+
 
           6. FALA E IMAGEM DEVEM COMBINAR.
-             Exemplos:
-             - ao falar do piloto, mostrar piloto/cockpit
-             - ao falar dos passageiros, mostrar cabine/passageiros
-             - ao falar de cobertura de TV, mostrar tela/noticiario
-             - ao falar de pouso, mostrar aproximacao/pouso
-             - ao falar de rota/localizacao, usar mapa
 
-          7. A TROCA DE CENA PODE OCORRER NO MEIO DE UMA FRASE.
-             Desde que a nova imagem continue coerente com o que esta sendo dito.
-             Isso e desejavel quando melhora o ritmo.
+             Nunca fale de algo diferente
+             do que a cena suporta.
+
+
+          7. A TROCA DE CENA PODE OCORRER
+             NO MEIO DE UMA FRASE.
+
+             Desde que a nova imagem continue coerente.
+
 
           8. ORDEM.
+
              Nao e obrigatorio reordenar.
+
              Mantenha a ordem original se ela for boa.
-             Reordene apenas quando houver ganho narrativo claro.
+
+             Reordene apenas quando houver ganho real.
+
+             No modo PRESERVAR,
+             prefira preservar a estrutura original
+             se a reordenacao puder prejudicar legenda
+             ou continuidade.
+
 
           9. MODO AUTO.
-             Use a narracao original como fonte factual quando ela for util,
-             mas NAO preserve automaticamente sua distribuicao entre cenas.
-             Reescreva e redistribua a fala para casar melhor com o visual.
+
+             Use narracao original como fonte factual,
+             quando util.
+
+             Pode reescrever e redistribuir.
+
 
           10. MODO ORIGINAL.
-              Preserve fatos e progressao geral da narracao original,
-              mas ainda edite visualmente com liberdade.
+
+              Preserve fatos e progressao geral
+              da narracao original.
+
 
           11. MODO NOVA.
-              Crie nova narracao natural, factual e audiovisual.
+
+              Crie nova narracao natural,
+              factual e audiovisual.
+
 
           12. MODO SEM_NARRACAO.
-              Todos os campos narration devem ficar vazios.
-              Ainda construa a melhor timeline visual possivel.
+
+              Todos os campos narration
+              devem ficar vazios.
+
 
           13. VIDEO SEM AUDIO.
+
               Use contexto + imagem.
-              Nao invente nomes, locais ou datas que nao estejam sustentados
-              pelo material recebido.
-              Quando houver incerteza, use linguagem descritiva.
+
+              Nao invente nomes,
+              locais ou datas
+              que nao estejam sustentados.
+
 
           14. INCREMENTO EXTERNO.
+
               Use no maximo 1.
-              So use se realmente melhorar a compreensao.
+
               Escolha:
-              - map: para rota, localizacao ou regiao
-              - fact_card: para contexto factual curto
-              - none: se nao houver ganho editorial
-              Se houver narracao, o incremento deve ser narrado enquanto aparece.
+              - map
+              - fact_card
+              - none
+
+              So use quando realmente melhorar
+              a compreensao.
+
 
           15. DURACAO E RITMO.
-              Nunca planeje narracao maior que o video.
-              Nunca dependa de congelar o ultimo frame.
-              Prefira cortes mais vivos e texto mais enxuto.
-              E aceitavel terminar o episodio antes da duracao original
-              se isso melhorar o ritmo.
 
-          16. NAO ESTIQUE CENA FRACA.
-              Se a cena original tiver 20 segundos mas so 5 segundos sao necessarios,
-              use apenas 5.
-              Nao use slow motion como solucao editorial para preencher tempo.
+              AUTO:
+              pode terminar antes do original.
+
+              SHORT_CURTO:
+              precisa terminar dentro de 10 a 20 segundos,
+              respeitando a duracao disponivel.
+
+              PRESERVAR:
+              precisa manter entre 90% e 100%
+              da duracao original.
+
+
+          16. NAO USE FREEZE FRAME.
+
+              Nunca dependa de congelar
+              o ultimo frame.
+
 
           17. FINAL.
-              O fechamento deve ser o ponto visual mais forte do desfecho.
-              Evite deixar o final se arrastar.
-              Quando houver narracao, termine naturalmente com:
+
+              O fechamento deve ser forte.
+
+              Quando houver narracao,
+              termine naturalmente com:
+
               "Parece mentira. Mas aconteceu."
 
+
           18. SAIDA EDITORIAL.
-              Cada item da timeline deve representar uma DECISAO DE EDICAO.
-              O campo reason deve explicar por que aquela imagem esta naquele ponto.
+
+              Cada item da timeline representa
+              uma decisao real de edicao.
+
+              O campo reason explica
+              por que aquela imagem esta naquele ponto.
+
 
           19. DURACAO POR ITEM.
-              Para kind=scene:
+
+              AUTO e SHORT_CURTO:
               - minimo preferencial: 1.5s
               - ideal: 2.0 a 6.5s
               - maximo recomendado: 8.0s
-              - nunca ultrapassar 110% da duracao original
-              - se a cena original for longa, use apenas o trecho necessario
+
+              PRESERVAR:
+              - pode usar duracoes maiores
+              - nunca ultrapasse a duracao disponivel
+                da cena original
+
 
           20. PRIORIDADE DE QUALIDADE.
-              Se precisar escolher entre:
-              - usar mais cenas
-              OU
-              - fazer um video mais curto e coeso,
-              escolha o video mais curto e coeso.
+
+              AUTO:
+              entre usar mais cenas e fazer um video
+              mais curto e coeso,
+              pode escolher mais curto.
+
+              SHORT_CURTO:
+              seja extremamente seletivo.
+
+              PRESERVAR:
+              a ordem explicita do usuario de preservar
+              90-100% da duracao tem prioridade
+              sobre encurtar por preferencia editorial.
+
 
           21. SINCRONISMO DE FALA POR ITEM.
-              A narracao de cada item PRECISA caber na duracao daquele item.
-              Use como referencia maxima aproximadamente 2.0 palavras por segundo.
-              Exemplos:
-              - 3 segundos: cerca de 6 palavras
-              - 5 segundos: cerca de 10 palavras
-              - 8 segundos: cerca de 16 palavras
-              Se precisar dizer mais, distribua a ideia entre cenas coerentes.
-              Nao concentre uma frase longa em uma imagem curta.
+
+              Use aproximadamente
+              ate 2 palavras por segundo.
+
+              A narracao precisa caber
+              no tempo visual.
+
 
           22. SOMA FINAL.
-              Antes de responder, confira mentalmente:
-              - soma das duracoes da timeline
-              - quantidade total de palavras narradas
-              - se a narracao cabe confortavelmente no tempo visual
-              A voz deve terminar ANTES ou junto do ultimo frame, nunca depois.
 
-          23. LEGENDA ORIGINAL DO VIDEO = ANCORA SEMANTICA.
-              A legenda original que ja esta queimada no video SERA MANTIDA.
-              NAO tente apagar, substituir ou ignorar esse texto visivel.
+              Antes de responder,
+              SOME as duracoes de todos
+              os itens da timeline.
 
-              Sempre que uma cena contiver legenda original acompanhando a fala:
-              - trate o texto visivel como parte permanente daquela cena
-              - a nova narracao deve falar da MESMA IDEIA principal
-              - nao precisa repetir palavra por palavra
-              - pode ampliar, contextualizar ou deixar a frase mais natural
-              - nunca contradiga a legenda
-              - nunca fale de outro assunto enquanto aquela legenda estiver visivel
-              - nao coloque uma cena com legenda sobre um assunto diferente da fala
+              SHORT_CURTO:
+              soma final entre
+              {min(10.0,total_duration):.2f}
+              e
+              {min(20.0,total_duration):.2f}s.
 
-              Exemplo:
-              legenda visivel: "Ele voou por duas horas"
-              narracao aceitavel:
-              "Para reduzir o peso da aeronave, Burke permaneceu circulando por quase duas horas."
+              PRESERVAR:
+              soma final entre
+              {total_duration*0.90:.2f}
+              e
+              {total_duration:.2f}s.
 
-              O texto muda, mas o sentido continua alinhado.
+              AUTO:
+              liberdade editorial normal.
 
-          24. LEGENDA VISIVEL TEM PRIORIDADE SOBRE REORDENACAO.
-              Se reordenar uma cena fizer a legenda original ficar incoerente com
-              a nova narracao, NAO reordene essa cena.
 
-              A prioridade e:
-              1. coerencia entre imagem
-              2. coerencia entre legenda original visivel
-              3. nova narracao
+          23. LEGENDA ORIGINAL = ANCORA SEMANTICA.
+
+              A legenda original ja queimada
+              no video SERA MANTIDA.
+
+              NAO:
+              - apagar
+              - traduzir visualmente
+              - substituir
+              - cobrir
+              - contradizer
+
+
+          24. LEGENDA VISIVEL TEM PRIORIDADE
+              SOBRE REORDENACAO.
+
+              Prioridade:
+              1. imagem
+              2. legenda original
+              3. narracao
               4. ritmo
 
-              Nunca sacrifique coerencia de legenda apenas para criar um corte mais dramatico.
 
           25. CENAS COM LEGENDA ORIGINAL.
-              Ao analisar as contact sheets, observe qualquer texto de legenda
-              que acompanha a narracao original.
 
-              Considere esse texto como pista editorial forte para decidir:
-              - qual assunto aquela cena suporta
-              - onde ela pode entrar na timeline
-              - qual trecho da nova narracao pode aparecer sobre ela
+              O texto visivel e uma pista editorial forte.
 
-          26. IDIOMA E TRADUCAO DA NARRACAO.
-              TODA narracao nova gerada pelo diretor deve ser em PORTUGUES DO BRASIL.
 
-              Se o idioma original detectado for diferente de portugues:
-              - entenda e preserve o significado da fala original
-              - traduza/adapte a narracao para portugues do Brasil natural
-              - nao traduza nomes proprios sem necessidade
-              - nao altere fatos, numeros, datas ou relacoes causais
-              - nao invente informacao ausente
-              - mantenha o sentido da fala original e do contexto visual
+          26. IDIOMA E TRADUCAO.
 
-              IMPORTANTE SOBRE LEGENDA VISIVEL:
-              - se o video ja tiver legenda queimada em espanhol, ingles ou outro idioma,
-                essa legenda DEVE permanecer exatamente no idioma em que esta
-              - NAO traduza, cubra, remova ou substitua a legenda original visivel
-              - a narracao em portugues deve continuar semanticamente alinhada
-                ao texto estrangeiro que aparece na tela
-              - se o video nao tiver legenda visivel, NAO crie legenda nova nesta etapa
+              TODA narracao nova deve ser
+              em PORTUGUES DO BRASIL.
 
-          RETORNE SOMENTE JSON VALIDO neste formato:
+              Se o idioma original nao for portugues:
+              - preserve significado
+              - traduza naturalmente para PT-BR
+              - preserve nomes
+              - preserve fatos
+              - preserve numeros
+              - preserve datas
+              - preserve causalidade
+
+              LEGENDA VISIVEL:
+              - permanece no idioma original
+              - nao traduzir
+              - nao cobrir
+              - nao remover
+              - nao substituir
+
+              Se nao houver legenda visivel:
+              NAO crie nova legenda nesta etapa.
+
+
+          RETORNE SOMENTE JSON VALIDO:
 
           {{
             "story_summary": "resumo curto",
             "mode_used": "AUTO|ORIGINAL|NOVA|SEM_NARRACAO",
+
             "research_notes": [
               {{
                 "fact": "fato utilizado",
                 "source": "origem do fato ou contexto do usuario"
               }}
             ],
+
             "increment": {{
               "type": "none|map|fact_card",
               "title": "",
@@ -1238,34 +1807,45 @@ jobs:
                 }}
               ]
             }},
+
             "timeline": [
               {{
                 "kind": "scene|increment",
                 "scene": 1,
                 "duration": 4.5,
-                "narration": "trecho natural da narracao",
-                "reason": "funcao editorial da cena"
+                "narration": "trecho natural",
+                "reason": "funcao editorial"
               }}
             ]
           }}
 
-          Para kind=increment, use scene=null.
+          Para kind=increment:
+          scene=null.
 
           IMPORTANTE:
-          - timeline pode omitir cenas
-          - timeline pode ser mais curta que o video original
-          - nao existe obrigacao de usar todo o material
-          - nao existe obrigacao de manter a ordem original
-          - nao existe obrigacao de ocupar toda a duracao
-          - a legenda original permanecera visivel no video final
-          - nunca gere uma narracao semanticamente incompatível com a legenda visivel
-          - priorize coerencia entre imagem + legenda original + narracao
+
+          - legenda original permanece visivel
+          - nova narracao em PT-BR
+          - nao invente fatos
+          - nao use freeze
+          - respeite OBRIGATORIAMENTE o modo de duracao
+            escolhido pelo usuario
           """
 
-          contents = [instructions]
+
+          # =====================================================
+          # CONTEUDO MULTIMODAL
+          # =====================================================
+
+          contents = [
+              instructions
+          ]
 
           for scene in manifest:
-              num = int(scene["scene"])
+
+              num = int(
+                  scene["scene"]
+              )
 
               sheet = Path(
                   f"output/stage06_vision/sheets/"
@@ -1279,7 +1859,9 @@ jobs:
                   f"{scene.get('transcript') or '[sem fala]'}"
               )
 
-              contents.append(scene_info)
+              contents.append(
+                  scene_info
+              )
 
               contents.append(
                   types.Part.from_bytes(
@@ -1288,16 +1870,10 @@ jobs:
                   )
               )
 
-          import time
-          from google.genai import errors
 
-          # -------------------------------------------------
-          # RESILIENCIA DE MODELO
-          #
-          # 503 = modelo temporariamente sobrecarregado.
-          # Tenta novamente e, se necessario, troca para
-          # outro Flash multimodal do Free Tier.
-          # -------------------------------------------------
+          # =====================================================
+          # RESILIENCIA GEMINI
+          # =====================================================
 
           models_to_try = [
               "gemini-3.7-flash",
@@ -1307,12 +1883,21 @@ jobs:
           ]
 
           response = None
+
           selected_model = None
+
           last_error = None
 
+
           for model_name in models_to_try:
-              for attempt in range(1, 5):
+
+              for attempt in range(
+                  1,
+                  5
+              ):
+
                   try:
+
                       print(
                           f"Tentando {model_name} "
                           f"(tentativa {attempt}/4)..."
@@ -1327,12 +1912,20 @@ jobs:
                           )
                       )
 
-                      if response and (response.text or "").strip():
+                      if (
+                          response and
+                          (
+                              response.text or ""
+                          ).strip()
+                      ):
+
                           selected_model = model_name
                           break
 
                   except Exception as exc:
+
                       last_error = exc
+
                       msg = str(exc)
 
                       msg_lower = msg.lower()
@@ -1363,34 +1956,56 @@ jobs:
                           raise
 
                       if attempt < 4:
-                          wait_seconds = 10 * attempt
-                          print(
-                              f"Aguardando {wait_seconds}s "
-                              f"antes de tentar novamente..."
+
+                          wait_seconds = (
+                              10 *
+                              attempt
                           )
-                          time.sleep(wait_seconds)
+
+                          print(
+                              f"Aguardando {wait_seconds}s..."
+                          )
+
+                          time.sleep(
+                              wait_seconds
+                          )
 
               if selected_model:
                   break
 
               print(
                   f"{model_name} indisponivel. "
-                  "Tentando modelo fallback..."
+                  "Tentando fallback..."
               )
 
-          if response is None or selected_model is None:
+
+          if (
+              response is None or
+              selected_model is None
+          ):
+
               raise RuntimeError(
                   "Nenhum modelo Gemini respondeu. "
                   f"Ultimo erro: {last_error}"
               )
 
+
           print(
-              f"AI Director executado com: {selected_model}"
+              f"AI Director executado com: "
+              f"{selected_model}"
           )
 
-          raw = (response.text or "").strip()
+
+          # =====================================================
+          # LER JSON
+          # =====================================================
+
+          raw = (
+              response.text or ""
+          ).strip()
 
           if not raw:
+
               raise RuntimeError(
                   "Gemini retornou resposta vazia."
               )
@@ -1409,8 +2024,13 @@ jobs:
           )
 
           try:
-              plan = json.loads(raw)
+
+              plan = json.loads(
+                  raw
+              )
+
           except json.JSONDecodeError:
+
               match = re.search(
                   r"\{.*\}",
                   raw,
@@ -1418,6 +2038,7 @@ jobs:
               )
 
               if not match:
+
                   raise RuntimeError(
                       "Gemini nao retornou JSON valido."
                   )
@@ -1426,90 +2047,189 @@ jobs:
                   match.group(0)
               )
 
+
           timeline = plan.get(
               "timeline",
               []
           )
 
           if not timeline:
+
               raise RuntimeError(
                   "Gemini retornou timeline vazia."
               )
 
+
+          # =====================================================
+          # VALIDAR CENAS
+          # =====================================================
+
           valid_scenes = {
-              int(s["scene"])
+              int(
+                  s["scene"]
+              )
               for s in manifest
           }
 
           original_durations = {
-              int(s["scene"]): float(s["duration"])
+              int(s["scene"]):
+              float(s["duration"])
               for s in manifest
           }
 
+
           for item in timeline:
-              kind = item.get("kind")
+
+              kind = item.get(
+                  "kind"
+              )
 
               if kind not in (
                   "scene",
                   "increment"
               ):
+
                   raise RuntimeError(
                       f"kind invalido: {kind}"
                   )
 
               duration = float(
-                  item.get("duration", 0)
+                  item.get(
+                      "duration",
+                      0
+                  )
               )
 
               if duration <= 0:
+
                   raise RuntimeError(
                       "Item com duracao invalida."
                   )
 
               if kind == "scene":
-                  scene = item.get("scene")
 
-                  if scene not in valid_scenes:
-                      raise RuntimeError(
-                          f"Cena invalida no plano: {scene}"
+                  scene = int(
+                      item.get(
+                          "scene"
                       )
-
-                  max_allowed = (
-                      original_durations[scene] * 1.10
                   )
 
-                  if duration > max_allowed + 0.05:
-                      item["duration"] = round(
-                          max_allowed,
-                          3
+                  if scene not in valid_scenes:
+
+                      raise RuntimeError(
+                          f"Cena invalida: {scene}"
                       )
 
-                  # Regra editorial automatica:
-                  # evita que uma tomada comum fique longa demais.
-                  if float(item["duration"]) > 8.0:
-                      item["duration"] = 8.0
+                  original_duration = (
+                      original_durations[
+                          scene
+                      ]
+                  )
 
-                  # Sincronismo automatico:
-                  # se a fala estimada nao couber na cena planejada,
-                  # aumenta a duracao apenas dentro do limite visual.
-                  # Nunca congela frame.
+                  max_allowed = (
+                      original_duration *
+                      1.10
+                  )
+
+
+                  # ---------------------------------------------
+                  # PRESERVAR
+                  # ---------------------------------------------
+
+                  if user_tempo == "PRESERVAR":
+
+                      if duration > original_duration:
+
+                          item[
+                              "duration"
+                          ] = round(
+                              original_duration,
+                              3
+                          )
+
+
+                  # ---------------------------------------------
+                  # AUTO / SHORT
+                  # ---------------------------------------------
+
+                  else:
+
+                      if (
+                          duration >
+                          max_allowed + 0.05
+                      ):
+
+                          item[
+                              "duration"
+                          ] = round(
+                              max_allowed,
+                              3
+                          )
+
+                      if (
+                          float(
+                              item["duration"]
+                          ) >
+                          8.0
+                      ):
+
+                          item[
+                              "duration"
+                          ] = 8.0
+
+
+                  # ---------------------------------------------
+                  # SINCRONISMO DE NARRACAO
+                  # ---------------------------------------------
+
                   narration = str(
-                      item.get("narration", "")
+                      item.get(
+                          "narration",
+                          ""
+                      )
                   ).strip()
 
                   if narration:
-                      words = len(narration.split())
-                      estimated_voice = words / 2.05
-                      current_duration = float(item["duration"])
 
-                      if estimated_voice > current_duration:
-                          desired = estimated_voice * 1.03
-                          editorial_cap = min(
-                              max_allowed,
-                              8.0
+                      words = len(
+                          narration.split()
+                      )
+
+                      estimated_voice = (
+                          words /
+                          2.05
+                      )
+
+                      current_duration = float(
+                          item["duration"]
+                      )
+
+                      if (
+                          estimated_voice >
+                          current_duration
+                      ):
+
+                          desired = (
+                              estimated_voice *
+                              1.03
                           )
 
-                          item["duration"] = round(
+                          if user_tempo == "PRESERVAR":
+
+                              editorial_cap = (
+                                  original_duration
+                              )
+
+                          else:
+
+                              editorial_cap = min(
+                                  max_allowed,
+                                  8.0
+                              )
+
+                          item[
+                              "duration"
+                          ] = round(
                               min(
                                   desired,
                                   editorial_cap
@@ -1517,15 +2237,446 @@ jobs:
                               3
                           )
 
-          timeline_duration = sum(
-              float(i["duration"])
-              for i in timeline
+
+          # =====================================================
+          # HARD GUARD DE DURACAO
+          # =====================================================
+
+          def timeline_total(items):
+
+              return sum(
+                  float(
+                      i.get(
+                          "duration",
+                          0
+                      )
+                  )
+                  for i in items
+              )
+
+
+          timeline_duration = timeline_total(
+              timeline
           )
 
-          if timeline_duration <= 1:
-              raise RuntimeError(
-                  "Duracao total da timeline invalida."
+
+          # =====================================================
+          # SHORT_CURTO
+          # =====================================================
+
+          if user_tempo == "SHORT_CURTO":
+
+              short_min = min(
+                  10.0,
+                  total_duration
               )
+
+              short_max = min(
+                  20.0,
+                  total_duration
+              )
+
+
+              # -----------------------------------------------
+              # Se passou de 20 s:
+              # corta a timeline no limite.
+              # -----------------------------------------------
+
+              if (
+                  timeline_duration >
+                  short_max
+              ):
+
+                  trimmed = []
+
+                  remaining = short_max
+
+                  for item in timeline:
+
+                      if remaining <= 0.05:
+                          break
+
+                      item_duration = float(
+                          item["duration"]
+                      )
+
+                      use_duration = min(
+                          item_duration,
+                          remaining
+                      )
+
+                      if use_duration > 0.05:
+
+                          new_item = dict(
+                              item
+                          )
+
+                          new_item[
+                              "duration"
+                          ] = round(
+                              use_duration,
+                              3
+                          )
+
+                          trimmed.append(
+                              new_item
+                          )
+
+                          remaining -= (
+                              use_duration
+                          )
+
+                  timeline = trimmed
+
+
+              # -----------------------------------------------
+              # Se ficou abaixo de 10 s:
+              # adiciona material real do video.
+              # -----------------------------------------------
+
+              timeline_duration = timeline_total(
+                  timeline
+              )
+
+              if (
+                  timeline_duration <
+                  short_min
+              ):
+
+                  used = {
+                      int(i["scene"])
+                      for i in timeline
+                      if (
+                          i.get("kind") ==
+                          "scene"
+                          and
+                          i.get("scene")
+                          is not None
+                      )
+                  }
+
+                  for scene_data in manifest:
+
+                      if (
+                          timeline_duration >=
+                          short_min
+                      ):
+                          break
+
+                      scene_num = int(
+                          scene_data[
+                              "scene"
+                          ]
+                      )
+
+                      if scene_num in used:
+                          continue
+
+                      available = min(
+                          float(
+                              scene_data[
+                                  "duration"
+                              ]
+                          ),
+                          short_max -
+                          timeline_duration
+                      )
+
+                      if available <= 0.05:
+                          continue
+
+                      timeline.append({
+                          "kind":
+                              "scene",
+
+                          "scene":
+                              scene_num,
+
+                          "duration":
+                              round(
+                                  available,
+                                  3
+                              ),
+
+                          "narration":
+                              "",
+
+                          "reason":
+                              "Complemento visual automatico para cumprir a duracao SHORT_CURTO."
+                      })
+
+                      used.add(
+                          scene_num
+                      )
+
+                      timeline_duration = (
+                          timeline_total(
+                              timeline
+                          )
+                      )
+
+
+              final_short = timeline_total(
+                  timeline
+              )
+
+              if (
+                  final_short <
+                  short_min - 0.20
+                  or
+                  final_short >
+                  short_max + 0.20
+              ):
+
+                  raise RuntimeError(
+                      "Nao foi possivel ajustar SHORT_CURTO "
+                      f"para a faixa desejada. "
+                      f"Duracao obtida: {final_short:.2f}s"
+                  )
+
+
+          # =====================================================
+          # PRESERVAR
+          # =====================================================
+
+          elif user_tempo == "PRESERVAR":
+
+              preserve_min = (
+                  total_duration *
+                  0.90
+              )
+
+              preserve_max = (
+                  total_duration
+              )
+
+              timeline_duration = timeline_total(
+                  timeline
+              )
+
+
+              # -----------------------------------------------
+              # Se Gemini passou de 100%, limita ao original.
+              # -----------------------------------------------
+
+              if (
+                  timeline_duration >
+                  preserve_max
+              ):
+
+                  trimmed = []
+
+                  remaining = preserve_max
+
+                  for item in timeline:
+
+                      if remaining <= 0.05:
+                          break
+
+                      item_duration = float(
+                          item["duration"]
+                      )
+
+                      use_duration = min(
+                          item_duration,
+                          remaining
+                      )
+
+                      if use_duration > 0.05:
+
+                          new_item = dict(
+                              item
+                          )
+
+                          new_item[
+                              "duration"
+                          ] = round(
+                              use_duration,
+                              3
+                          )
+
+                          trimmed.append(
+                              new_item
+                          )
+
+                          remaining -= (
+                              use_duration
+                          )
+
+                  timeline = trimmed
+
+
+              timeline_duration = timeline_total(
+                  timeline
+              )
+
+
+              # -----------------------------------------------
+              # PROTECAO FORTE:
+              #
+              # Se Gemini ignorou PRESERVAR e encurtou demais,
+              # reconstruimos visualmente a timeline em ordem
+              # original usando 95% de cada cena.
+              #
+              # Assim um video de 60 s nao vira 20 s.
+              # -----------------------------------------------
+
+              if (
+                  timeline_duration <
+                  preserve_min
+              ):
+
+                  print(
+                      "AVISO: Gemini entregou timeline menor "
+                      "que 90% do original."
+                  )
+
+                  print(
+                      "Ativando protecao PRESERVAR."
+                  )
+
+                  narration_parts = []
+
+                  for item in timeline:
+
+                      text = str(
+                          item.get(
+                              "narration",
+                              ""
+                          )
+                      ).strip()
+
+                      if text:
+                          narration_parts.append(
+                              text
+                          )
+
+                  preserved_timeline = []
+
+                  for scene_data in manifest:
+
+                      duration = (
+                          float(
+                              scene_data[
+                                  "duration"
+                              ]
+                          ) *
+                          0.95
+                      )
+
+                      preserved_timeline.append({
+                          "kind":
+                              "scene",
+
+                          "scene":
+                              int(
+                                  scene_data[
+                                      "scene"
+                                  ]
+                              ),
+
+                          "duration":
+                              round(
+                                  duration,
+                                  3
+                              ),
+
+                          "narration":
+                              "",
+
+                          "reason":
+                              "Cena mantida automaticamente para preservar aproximadamente a duracao original."
+                      })
+
+
+                  # Mantemos a narracao produzida pelo Gemini
+                  # sem alterar idioma ou conteudo.
+                  #
+                  # Ela e colocada no primeiro item porque
+                  # o Stage 08 posteriormente monta a fala
+                  # como fluxo continuo de qualquer maneira.
+
+                  if (
+                      narration_parts and
+                      preserved_timeline and
+                      user_mode !=
+                      "SEM_NARRACAO"
+                  ):
+
+                      preserved_timeline[
+                          0
+                      ][
+                          "narration"
+                      ] = " ".join(
+                          narration_parts
+                      )
+
+
+                  timeline = (
+                      preserved_timeline
+                  )
+
+
+              final_preserve = timeline_total(
+                  timeline
+              )
+
+
+              if (
+                  final_preserve <
+                  preserve_min - 0.25
+                  or
+                  final_preserve >
+                  preserve_max + 0.25
+              ):
+
+                  raise RuntimeError(
+                      "Protecao PRESERVAR nao conseguiu "
+                      "atingir 90-100% do original. "
+                      f"Obtido: {final_preserve:.2f}s | "
+                      f"Original: {total_duration:.2f}s"
+                  )
+
+
+          # =====================================================
+          # FINALIZAR PLANO
+          # =====================================================
+
+          plan[
+              "timeline"
+          ] = timeline
+
+          plan[
+              "tempo_mode"
+          ] = user_tempo
+
+          plan[
+              "source_duration"
+          ] = round(
+              total_duration,
+              3
+          )
+
+          plan[
+              "timeline_duration"
+          ] = round(
+              timeline_total(
+                  timeline
+              ),
+              3
+          )
+
+
+          if (
+              plan[
+                  "timeline_duration"
+              ] <= 1
+          ):
+
+              raise RuntimeError(
+                  "Duracao total invalida."
+              )
+
 
           Path(
               "output/stage06_ai/director_plan.json"
@@ -1538,6 +2689,7 @@ jobs:
               encoding="utf-8"
           )
 
+
           Path(
               "output/stage06_ai/director_raw.txt"
           ).write_text(
@@ -1545,11 +2697,34 @@ jobs:
               encoding="utf-8"
           )
 
+
           Path(
               "output/stage06_ai/provider.txt"
           ).write_text(
               selected_model + "\n",
               encoding="utf-8"
+          )
+
+
+          print(
+              "========================================"
+          )
+
+          print(
+              f"TEMPO: {user_tempo}"
+          )
+
+          print(
+              f"ORIGINAL: {total_duration:.2f}s"
+          )
+
+          print(
+              "TIMELINE FINAL: "
+              f"{timeline_total(timeline):.2f}s"
+          )
+
+          print(
+              "========================================"
           )
 
           print(
@@ -1566,28 +2741,23 @@ jobs:
           test -s output/stage06_ai/director_plan.json
           test -s output/stage06_ai/provider.txt
 
+
       # =========================================================
       # STAGE 06B - PLANO MANUAL
-      #
-      # Quando modo=PLANO_MANUAL:
-      # - ignora completamente o Gemini
-      # - le ./manual_plan.json do repositorio
-      # - valida estrutura, cenas e duracoes
-      # - copia o plano para o mesmo local usado pelo restante
-      #   do pipeline
-      #
-      # Assim o GitHub/FFmpeg vira apenas EXECUTOR do plano.
       # =========================================================
 
       - name: Stage 06B - Carregar Plano Manual
         if: ${{ inputs.etapa != 'ACABAMENTO_SEM_IA' && inputs.modo == 'PLANO_MANUAL' }}
         shell: bash
+
         run: |
           set -e
 
           if [ ! -s "./manual_plan.json" ]; then
-            echo "ERRO: modo PLANO_MANUAL selecionado, mas manual_plan.json nao existe."
-            echo "Adicione manual_plan.json na raiz do repositorio."
+
+            echo "ERRO: modo PLANO_MANUAL selecionado,"
+            echo "mas manual_plan.json nao existe."
+
             exit 1
           fi
 
@@ -1604,9 +2774,11 @@ jobs:
           echo "PLANO_MANUAL" \
             > output/stage06_ai/provider.txt
 
+
       - name: Stage 06B - Validar Plano Manual
         if: ${{ inputs.etapa != 'ACABAMENTO_SEM_IA' && inputs.modo == 'PLANO_MANUAL' }}
         shell: bash
+
         run: |
           set -e
 
@@ -1634,9 +2806,13 @@ jobs:
               )
           )
 
-          if not isinstance(plan, dict):
+          if not isinstance(
+              plan,
+              dict
+          ):
+
               raise RuntimeError(
-                  "manual_plan.json precisa ser um objeto JSON."
+                  "manual_plan.json precisa ser objeto JSON."
               )
 
           timeline = plan.get(
@@ -1644,18 +2820,28 @@ jobs:
               []
           )
 
-          if not isinstance(timeline, list) or not timeline:
+          if (
+              not isinstance(
+                  timeline,
+                  list
+              ) or
+              not timeline
+          ):
+
               raise RuntimeError(
-                  "manual_plan.json precisa conter timeline com pelo menos 1 item."
+                  "manual_plan.json precisa conter timeline."
               )
 
           valid_scenes = {
-              int(s["scene"])
+              int(
+                  s["scene"]
+              )
               for s in manifest
           }
 
           original_durations = {
-              int(s["scene"]): float(s["duration"])
+              int(s["scene"]):
+              float(s["duration"])
               for s in manifest
           }
 
@@ -1674,6 +2860,7 @@ jobs:
               "map",
               "fact_card"
           ):
+
               raise RuntimeError(
                   f"increment.type invalido: {inc_type}"
               )
@@ -1682,79 +2869,124 @@ jobs:
               timeline,
               start=1
           ):
-              if not isinstance(item, dict):
+
+              if not isinstance(
+                  item,
+                  dict
+              ):
+
                   raise RuntimeError(
                       f"timeline item {idx} invalido."
                   )
 
-              kind = item.get("kind")
+              kind = item.get(
+                  "kind"
+              )
 
               if kind not in (
                   "scene",
                   "increment"
               ):
+
                   raise RuntimeError(
-                      f"timeline item {idx}: kind invalido ({kind})."
+                      f"timeline item {idx}: kind invalido."
                   )
 
-              try:
-                  duration = float(
-                      item.get(
-                          "duration",
-                          0
-                      )
+              duration = float(
+                  item.get(
+                      "duration",
+                      0
                   )
-              except Exception:
+              )
+
+              if duration <= 0:
+
                   raise RuntimeError(
                       f"timeline item {idx}: duration invalida."
                   )
 
-              if duration <= 0:
-                  raise RuntimeError(
-                      f"timeline item {idx}: duration deve ser > 0."
-                  )
-
               if kind == "scene":
+
                   scene = item.get(
                       "scene"
                   )
 
                   if scene not in valid_scenes:
+
                       raise RuntimeError(
-                          f"timeline item {idx}: cena inexistente ({scene})."
+                          f"timeline item {idx}: cena inexistente."
                       )
 
                   max_allowed = (
-                      original_durations[scene] * 1.10
+                      original_durations[
+                          scene
+                      ] *
+                      1.10
                   )
 
-                  if duration > max_allowed + 0.05:
+                  if (
+                      duration >
+                      max_allowed + 0.05
+                  ):
+
                       raise RuntimeError(
-                          f"timeline item {idx}: duracao {duration:.2f}s "
-                          f"ultrapassa 110% da cena {scene:03d} "
-                          f"({max_allowed:.2f}s)."
+                          f"timeline item {idx}: duracao acima do limite."
                       )
 
               if kind == "increment":
-                  item["scene"] = None
 
-          plan["mode_used"] = "PLANO_MANUAL"
-
-          if "story_summary" not in plan:
-              plan["story_summary"] = ""
+                  item[
+                      "scene"
+                  ] = None
 
 
-          if "research_notes" not in plan:
-              plan["research_notes"] = []
+          plan[
+              "mode_used"
+          ] = "PLANO_MANUAL"
 
-          if "increment" not in plan:
-              plan["increment"] = {
-                  "type": "none",
-                  "title": "",
-                  "subtitle": "",
-                  "duration": 0,
-                  "narration": "",
-                  "points": []
+          if (
+              "story_summary"
+              not in plan
+          ):
+
+              plan[
+                  "story_summary"
+              ] = ""
+
+          if (
+              "research_notes"
+              not in plan
+          ):
+
+              plan[
+                  "research_notes"
+              ] = []
+
+          if (
+              "increment"
+              not in plan
+          ):
+
+              plan[
+                  "increment"
+              ] = {
+                  "type":
+                      "none",
+
+                  "title":
+                      "",
+
+                  "subtitle":
+                      "",
+
+                  "duration":
+                      0,
+
+                  "narration":
+                      "",
+
+                  "points":
+                      []
               }
 
           plan_path.write_text(
@@ -1769,9 +3001,6 @@ jobs:
           print(
               "PLANO MANUAL VALIDADO"
           )
-          print(
-              f"Itens da timeline: {len(timeline)}"
-          )
           PY
 
           python3 /tmp/validate_manual_plan.py
@@ -1779,35 +3008,22 @@ jobs:
           test -s output/stage06_ai/director_plan.json
           test -s output/stage06_ai/provider.txt
 
+
       # =========================================================
-      # STAGE 06C - REUTILIZAR PLANO APROVADO
-      #
-      # Modo temporario para testes de acabamento:
-      # - NAO chama Gemini
-      # - NAO consome cota de IA
-      # - usa ./approved_plan.json salvo no repositorio
-      #
-      # Para criar approved_plan.json:
-      # 1. baixe director_plan.json de uma execucao AUTO aprovada
-      # 2. renomeie para approved_plan.json
-      # 3. envie para a raiz do repositorio
-      #
-      # Depois selecione:
-      # etapa = ACABAMENTO_SEM_IA
+      # STAGE 06C - PLANO APROVADO
       # =========================================================
 
       - name: Stage 06C - Carregar Plano Aprovado sem IA
         if: ${{ inputs.etapa == 'ACABAMENTO_SEM_IA' }}
         shell: bash
+
         run: |
           set -e
 
           if [ ! -s "./approved_plan.json" ]; then
-            echo "ERRO: etapa ACABAMENTO_SEM_IA selecionada."
-            echo "Arquivo ./approved_plan.json nao encontrado."
-            echo ""
-            echo "Baixe director_plan.json da execucao AUTO aprovada,"
-            echo "renomeie para approved_plan.json e envie para a raiz do repositorio."
+
+            echo "ERRO: approved_plan.json nao encontrado."
+
             exit 1
           fi
 
@@ -1824,15 +3040,11 @@ jobs:
           echo "PLANO_APROVADO_SEM_IA" \
             > output/stage06_ai/provider.txt
 
-          echo "========================================"
-          echo "PLANO APROVADO CARREGADO"
-          echo "Gemini: NAO EXECUTADO"
-          echo "Consumo de cota IA: ZERO"
-          echo "========================================"
 
       - name: Stage 06C - Validar Plano Aprovado
         if: ${{ inputs.etapa == 'ACABAMENTO_SEM_IA' }}
         shell: bash
+
         run: |
           set -e
 
@@ -1865,18 +3077,28 @@ jobs:
               []
           )
 
-          if not isinstance(timeline, list) or not timeline:
+          if (
+              not isinstance(
+                  timeline,
+                  list
+              ) or
+              not timeline
+          ):
+
               raise RuntimeError(
                   "approved_plan.json nao possui timeline valida."
               )
 
           valid_scenes = {
-              int(s["scene"])
+              int(
+                  s["scene"]
+              )
               for s in manifest
           }
 
           original_durations = {
-              int(s["scene"]): float(s["duration"])
+              int(s["scene"]):
+              float(s["duration"])
               for s in manifest
           }
 
@@ -1884,46 +3106,66 @@ jobs:
               timeline,
               start=1
           ):
-              kind = item.get("kind")
+
+              kind = item.get(
+                  "kind"
+              )
 
               if kind not in (
                   "scene",
                   "increment"
               ):
+
                   raise RuntimeError(
-                      f"Item {idx}: kind invalido ({kind})."
+                      f"Item {idx}: kind invalido."
                   )
 
               duration = float(
-                  item.get("duration", 0)
+                  item.get(
+                      "duration",
+                      0
+                  )
               )
 
               if duration <= 0:
+
                   raise RuntimeError(
                       f"Item {idx}: duration invalida."
                   )
 
               if kind == "scene":
-                  scene = item.get("scene")
+
+                  scene = item.get(
+                      "scene"
+                  )
 
                   if scene not in valid_scenes:
+
                       raise RuntimeError(
-                          f"Item {idx}: cena {scene} nao existe neste video."
+                          f"Item {idx}: cena inexistente."
                       )
 
                   max_allowed = (
-                      original_durations[scene] * 1.10
+                      original_durations[
+                          scene
+                      ] *
+                      1.10
                   )
 
-                  if duration > max_allowed + 0.05:
+                  if (
+                      duration >
+                      max_allowed + 0.05
+                  ):
+
                       raise RuntimeError(
-                          f"Item {idx}: duracao da cena {scene} "
-                          f"ultrapassa o limite disponivel."
+                          f"Item {idx}: duracao acima do limite."
                       )
 
               if kind == "increment":
-                  item["scene"] = None
 
+                  item[
+                      "scene"
+                  ] = None
 
           plan_path.write_text(
               json.dumps(
@@ -1935,10 +3177,7 @@ jobs:
           )
 
           print(
-              "PLANO APROVADO VALIDADO - SEM CHAMADA DE IA"
-          )
-          print(
-              f"Itens da timeline: {len(timeline)}"
+              "PLANO APROVADO VALIDADO"
           )
           PY
 
@@ -1947,17 +3186,14 @@ jobs:
           test -s output/stage06_ai/director_plan.json
           test -s output/stage06_ai/provider.txt
 
+
       # =========================================================
-      # STAGE 07 - CRIAR INCREMENTO GENERICO
-      #
-      # Suporta:
-      # - map
-      # - fact_card
-      # - none
+      # STAGE 07 - INCREMENTO
       # =========================================================
 
       - name: Stage 07 - Criar Incremento do Diretor
         shell: bash
+
         run: |
           set -e
 
@@ -1966,69 +3202,133 @@ jobs:
           cat > /tmp/build_increment_v15.py <<'PY'
           import io
           import json
-          import math
-          import os
           import subprocess
           import requests
-          from pathlib import Path
-          from PIL import Image, ImageDraw, ImageFont
 
-          plan = json.loads(
-              Path("output/stage06_ai/director_plan.json")
-              .read_text(encoding="utf-8")
+          from pathlib import Path
+
+          from PIL import (
+              Image,
+              ImageDraw,
+              ImageFont
           )
 
-          inc = plan.get("increment", {}) or {}
-          inc_type = inc.get("type", "none")
-          duration = max(float(inc.get("duration", 0) or 0), 0)
+          plan = json.loads(
+              Path(
+                  "output/stage06_ai/director_plan.json"
+              ).read_text(
+                  encoding="utf-8"
+              )
+          )
 
-          out_dir = Path("output/stage07")
-          out_dir.mkdir(parents=True, exist_ok=True)
+          inc = plan.get(
+              "increment",
+              {}
+          ) or {}
 
-          if inc_type == "none" or duration <= 0:
+          inc_type = inc.get(
+              "type",
+              "none"
+          )
+
+          duration = max(
+              float(
+                  inc.get(
+                      "duration",
+                      0
+                  ) or 0
+              ),
+              0
+          )
+
+          out_dir = Path(
+              "output/stage07"
+          )
+
+          out_dir.mkdir(
+              parents=True,
+              exist_ok=True
+          )
+
+          if (
+              inc_type == "none" or
+              duration <= 0
+          ):
+
               Path(
                   "output/stage07/increment_none.txt"
               ).write_text(
                   "AI Director decidiu nao usar incremento.",
                   encoding="utf-8"
               )
-              print("Sem incremento.")
+
+              print(
+                  "Sem incremento."
+              )
+
               raise SystemExit(0)
+
 
           width = 1080
           height = 1920
 
+
           def font(size):
+
               paths = [
                   "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
                   "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf"
               ]
+
               for p in paths:
+
                   if Path(p).exists():
-                      return ImageFont.truetype(p, size=size)
+
+                      return ImageFont.truetype(
+                          p,
+                          size=size
+                      )
+
               return ImageFont.load_default()
+
 
           title_font = font(48)
           body_font = font(34)
           small_font = font(27)
 
+
           if inc_type == "map":
-              points = inc.get("points", [])
+
+              points = inc.get(
+                  "points",
+                  []
+              )
 
               if not points:
+
                   raise RuntimeError(
                       "Incremento map sem points."
                   )
 
               center_lat = sum(
-                  float(p["lat"]) for p in points
+                  float(
+                      p["lat"]
+                  )
+                  for p in points
               ) / len(points)
 
               center_lon = sum(
-                  float(p["lon"]) for p in points
+                  float(
+                      p["lon"]
+                  )
+                  for p in points
               ) / len(points)
 
-              zoom = 8 if len(points) > 1 else 10
+              zoom = (
+                  8
+                  if len(points) > 1
+                  else 10
+              )
 
               url = (
                   "https://staticmap.openstreetmap.de/staticmap.php"
@@ -2041,6 +3341,7 @@ jobs:
               img = None
 
               try:
+
                   r = requests.get(
                       url,
                       timeout=25,
@@ -2049,76 +3350,162 @@ jobs:
                               "PareceMentiraVideoEngine/1.0"
                       }
                   )
-                  r.raise_for_status()
-                  candidate = Image.open(
-                      io.BytesIO(r.content)
-                  ).convert("RGB")
 
-                  if candidate.size == (width, height):
+                  r.raise_for_status()
+
+                  candidate = Image.open(
+                      io.BytesIO(
+                          r.content
+                      )
+                  ).convert(
+                      "RGB"
+                  )
+
+                  if (
+                      candidate.size ==
+                      (
+                          width,
+                          height
+                      )
+                  ):
+
                       img = candidate
+
               except Exception as exc:
+
                   print(
                       "Mapa online indisponivel:",
                       exc
                   )
 
               if img is None:
+
                   img = Image.new(
                       "RGB",
-                      (width, height),
-                      (18, 37, 48)
+                      (
+                          width,
+                          height
+                      ),
+                      (
+                          18,
+                          37,
+                          48
+                      )
                   )
 
-              draw = ImageDraw.Draw(img, "RGBA")
+              draw = ImageDraw.Draw(
+                  img,
+                  "RGBA"
+              )
 
               draw.rounded_rectangle(
-                  (55, 70, width - 55, 260),
+                  (
+                      55,
+                      70,
+                      width - 55,
+                      260
+                  ),
                   radius=30,
-                  fill=(0, 0, 0, 180)
+                  fill=(
+                      0,
+                      0,
+                      0,
+                      180
+                  )
               )
 
               draw.text(
-                  (90, 100),
-                  str(inc.get("title", "MAPA")),
+                  (
+                      90,
+                      100
+                  ),
+                  str(
+                      inc.get(
+                          "title",
+                          "MAPA"
+                      )
+                  ),
                   font=title_font,
                   fill="white"
               )
 
               draw.text(
-                  (90, 170),
-                  str(inc.get("subtitle", "")),
+                  (
+                      90,
+                      170
+                  ),
+                  str(
+                      inc.get(
+                          "subtitle",
+                          ""
+                      )
+                  ),
                   font=body_font,
-                  fill=(255,255,255,225)
+                  fill=(
+                      255,
+                      255,
+                      255,
+                      225
+                  )
               )
 
-              # Marcadores aproximados no mapa.
-              # O fundo ja e geografico; aqui adicionamos legenda clara.
-              y = height - 350
+              y = (
+                  height -
+                  350
+              )
 
               draw.rounded_rectangle(
-                  (70, y - 30, width - 70, height - 100),
+                  (
+                      70,
+                      y - 30,
+                      width - 70,
+                      height - 100
+                  ),
                   radius=28,
-                  fill=(0, 0, 0, 170)
+                  fill=(
+                      0,
+                      0,
+                      0,
+                      170
+                  )
               )
 
               labels = "  •  ".join(
-                  str(p.get("label", ""))
+                  str(
+                      p.get(
+                          "label",
+                          ""
+                      )
+                  )
                   for p in points
-                  if p.get("label")
+                  if p.get(
+                      "label"
+                  )
               )
 
               draw.text(
-                  (105, y + 15),
+                  (
+                      105,
+                      y + 15
+                  ),
                   labels[:70],
                   font=small_font,
                   fill="white"
               )
 
               draw.text(
-                  (105, y + 75),
+                  (
+                      105,
+                      y + 75
+                  ),
                   "© OpenStreetMap contributors",
                   font=small_font,
-                  fill=(255,255,255,190)
+                  fill=(
+                      255,
+                      255,
+                      255,
+                      190
+                  )
               )
 
               img.save(
@@ -2126,57 +3513,127 @@ jobs:
                   "PNG"
               )
 
+
           elif inc_type == "fact_card":
+
               img = Image.new(
                   "RGB",
-                  (width, height),
-                  (18, 37, 48)
+                  (
+                      width,
+                      height
+                  ),
+                  (
+                      18,
+                      37,
+                      48
+                  )
               )
 
-              draw = ImageDraw.Draw(img, "RGBA")
+              draw = ImageDraw.Draw(
+                  img,
+                  "RGBA"
+              )
 
               draw.rounded_rectangle(
-                  (70, 300, width - 70, 1580),
+                  (
+                      70,
+                      300,
+                      width - 70,
+                      1580
+                  ),
                   radius=50,
-                  fill=(0, 0, 0, 105)
+                  fill=(
+                      0,
+                      0,
+                      0,
+                      105
+                  )
               )
 
               draw.text(
-                  (110, 390),
-                  str(inc.get("title", "VOCÊ SABIA?")),
+                  (
+                      110,
+                      390
+                  ),
+                  str(
+                      inc.get(
+                          "title",
+                          "VOCÊ SABIA?"
+                      )
+                  ),
                   font=title_font,
                   fill="white"
               )
 
               subtitle = str(
-                  inc.get("subtitle", "")
+                  inc.get(
+                      "subtitle",
+                      ""
+                  )
               ).strip()
 
-              # Quebra simples em linhas.
               words = subtitle.split()
+
               lines = []
+
               current = []
 
               for word in words:
-                  test = " ".join(current + [word])
-                  if len(test) > 36 and current:
-                      lines.append(" ".join(current))
-                      current = [word]
+
+                  test = " ".join(
+                      current +
+                      [word]
+                  )
+
+                  if (
+                      len(test) >
+                      36 and
+                      current
+                  ):
+
+                      lines.append(
+                          " ".join(
+                              current
+                          )
+                      )
+
+                      current = [
+                          word
+                      ]
+
                   else:
-                      current.append(word)
+
+                      current.append(
+                          word
+                      )
 
               if current:
-                  lines.append(" ".join(current))
+
+                  lines.append(
+                      " ".join(
+                          current
+                      )
+                  )
 
               y = 540
 
               for line in lines[:8]:
+
                   draw.text(
-                      (110, y),
+                      (
+                          110,
+                          y
+                      ),
                       line,
                       font=body_font,
-                      fill=(255,255,255,235)
+                      fill=(
+                          255,
+                          255,
+                          255,
+                          235
+                      )
                   )
+
                   y += 70
 
               img.save(
@@ -2184,36 +3641,50 @@ jobs:
                   "PNG"
               )
 
+
           else:
+
               raise RuntimeError(
                   f"Tipo de incremento nao suportado: {inc_type}"
               )
 
-          # Anima o incremento.
-          subprocess.run([
-              "ffmpeg", "-y",
-              "-loop", "1",
-              "-framerate", "30",
-              "-i", "output/stage07/increment_base.png",
-              "-vf",
-              (
-                  "scale=1080:1920,"
-                  "zoompan="
-                  "z='min(zoom+0.0014,1.12)':"
-                  "x='iw/2-(iw/zoom/2)':"
-                  "y='ih/2-(ih/zoom/2)':"
-                  f"d={int(duration*30)}:"
-                  "s=1080x1920:fps=30,"
-                  "format=yuv420p"
-              ),
-              "-t", f"{duration:.3f}",
-              "-an",
-              "-c:v", "libx264",
-              "-preset", "veryfast",
-              "-crf", "20",
-              "-movflags", "+faststart",
-              "output/stage07/increment.mp4"
-          ], check=True)
+
+          subprocess.run(
+              [
+                  "ffmpeg",
+                  "-y",
+                  "-loop",
+                  "1",
+                  "-framerate",
+                  "30",
+                  "-i",
+                  "output/stage07/increment_base.png",
+                  "-vf",
+                  (
+                      "scale=1080:1920,"
+                      "zoompan="
+                      "z='min(zoom+0.0014,1.12)':"
+                      "x='iw/2-(iw/zoom/2)':"
+                      "y='ih/2-(ih/zoom/2)':"
+                      f"d={int(duration*30)}:"
+                      "s=1080x1920:fps=30,"
+                      "format=yuv420p"
+                  ),
+                  "-t",
+                  f"{duration:.3f}",
+                  "-an",
+                  "-c:v",
+                  "libx264",
+                  "-preset",
+                  "veryfast",
+                  "-crf",
+                  "20",
+                  "-movflags",
+                  "+faststart",
+                  "output/stage07/increment.mp4"
+              ],
+              check=True
+          )
 
           print(
               f"Incremento criado: {inc_type} "
@@ -2223,16 +3694,14 @@ jobs:
 
           python3 /tmp/build_increment_v15.py
 
+
       # =========================================================
-      # STAGE 07 - RENDER DA TIMELINE DO AI DIRECTOR
-      #
-      # Cada cena e ajustada a duracao planejada.
-      # NAO congela o ultimo frame.
-      # Se precisar alongar levemente, usa slow motion suave.
+      # STAGE 07 - RENDER TIMELINE
       # =========================================================
 
       - name: Stage 07 - Renderizar Timeline Visual
         shell: bash
+
         run: |
           set -e
 
@@ -2241,117 +3710,199 @@ jobs:
           cat > /tmp/render_timeline_v15.py <<'PY'
           import json
           import subprocess
+
           from pathlib import Path
 
           plan = json.loads(
-              Path("output/stage06_ai/director_plan.json")
-              .read_text(encoding="utf-8")
+              Path(
+                  "output/stage06_ai/director_plan.json"
+              ).read_text(
+                  encoding="utf-8"
+              )
           )
 
           manifest = json.loads(
-              Path("output/stage05/scene_manifest.json")
-              .read_text(encoding="utf-8")
+              Path(
+                  "output/stage05/scene_manifest.json"
+              ).read_text(
+                  encoding="utf-8"
+              )
           )
 
           by_scene = {
-              int(s["scene"]): s for s in manifest
+              int(
+                  s["scene"]
+              ):
+              s
+              for s in manifest
           }
 
-          timeline = plan.get("timeline", [])
+          timeline = plan.get(
+              "timeline",
+              []
+          )
+
           concat_lines = []
 
-          for idx, item in enumerate(timeline, start=1):
-              kind = item.get("kind")
-              target = float(item["duration"])
+          for idx, item in enumerate(
+              timeline,
+              start=1
+          ):
+
+              kind = item.get(
+                  "kind"
+              )
+
+              target = float(
+                  item[
+                      "duration"
+                  ]
+              )
 
               out = Path(
-                  f"output/stage07/segments/"
+                  "output/stage07/segments/"
                   f"{idx:03d}_{kind}.mp4"
               )
 
               if kind == "increment":
+
                   source = Path(
                       "output/stage07/increment.mp4"
                   )
 
                   if not source.exists():
-                      # Se a IA colocou increment na timeline mas decidiu
-                      # type=none, simplesmente ignora o item.
                       continue
 
                   src_duration = float(
-                      subprocess.check_output([
-                          "ffprobe",
-                          "-v", "error",
-                          "-show_entries",
-                          "format=duration",
-                          "-of",
-                          "default=noprint_wrappers=1:nokey=1",
-                          str(source)
-                      ], text=True).strip()
+                      subprocess.check_output(
+                          [
+                              "ffprobe",
+                              "-v",
+                              "error",
+                              "-show_entries",
+                              "format=duration",
+                              "-of",
+                              "default=noprint_wrappers=1:nokey=1",
+                              str(source)
+                          ],
+                          text=True
+                      ).strip()
                   )
 
               else:
-                  scene = int(item["scene"])
+
+                  scene = int(
+                      item[
+                          "scene"
+                      ]
+                  )
+
                   source = Path(
-                      f"output/stage04_clips/"
+                      "output/stage04_clips/"
                       f"scene_{scene:03d}.mp4"
                   )
 
                   src_duration = float(
-                      by_scene[scene]["duration"]
+                      by_scene[
+                          scene
+                      ][
+                          "duration"
+                      ]
                   )
 
-              if target <= src_duration:
-                  vf = "fps=30,format=yuv420p"
+
+              if (
+                  target <=
+                  src_duration
+              ):
 
                   cmd = [
-                      "ffmpeg", "-y",
-                      "-i", str(source),
-                      "-t", f"{target:.3f}",
+                      "ffmpeg",
+                      "-y",
+                      "-i",
+                      str(source),
+                      "-t",
+                      f"{target:.3f}",
                       "-an",
-                      "-vf", vf,
-                      "-c:v", "libx264",
-                      "-preset", "veryfast",
-                      "-crf", "20",
-                      "-pix_fmt", "yuv420p",
-                      "-movflags", "+faststart",
+                      "-vf",
+                      "fps=30,format=yuv420p",
+                      "-c:v",
+                      "libx264",
+                      "-preset",
+                      "veryfast",
+                      "-crf",
+                      "20",
+                      "-pix_fmt",
+                      "yuv420p",
+                      "-movflags",
+                      "+faststart",
                       str(out)
                   ]
+
               else:
-                  # Slow motion leve, nunca freeze.
-                  factor = target / src_duration
-                  factor = min(factor, 1.10)
-                  actual_target = src_duration * factor
+
+                  factor = (
+                      target /
+                      src_duration
+                  )
+
+                  factor = min(
+                      factor,
+                      1.10
+                  )
+
+                  actual_target = (
+                      src_duration *
+                      factor
+                  )
 
                   cmd = [
-                      "ffmpeg", "-y",
-                      "-i", str(source),
+                      "ffmpeg",
+                      "-y",
+                      "-i",
+                      str(source),
                       "-an",
                       "-vf",
                       (
                           f"setpts={factor:.6f}*PTS,"
-                          "fps=30,format=yuv420p"
+                          "fps=30,"
+                          "format=yuv420p"
                       ),
-                      "-t", f"{actual_target:.3f}",
-                      "-c:v", "libx264",
-                      "-preset", "veryfast",
-                      "-crf", "20",
-                      "-pix_fmt", "yuv420p",
-                      "-movflags", "+faststart",
+                      "-t",
+                      f"{actual_target:.3f}",
+                      "-c:v",
+                      "libx264",
+                      "-preset",
+                      "veryfast",
+                      "-crf",
+                      "20",
+                      "-pix_fmt",
+                      "yuv420p",
+                      "-movflags",
+                      "+faststart",
                       str(out)
                   ]
 
-              subprocess.run(cmd, check=True)
+              subprocess.run(
+                  cmd,
+                  check=True
+              )
 
               concat_lines.append(
-                  "file '" + str(out.resolve()) + "'"
+                  "file '" +
+                  str(
+                      out.resolve()
+                  ) +
+                  "'"
               )
 
           Path(
               "output/stage07/final_concat.txt"
           ).write_text(
-              "\n".join(concat_lines) + "\n",
+              "\n".join(
+                  concat_lines
+              ) +
+              "\n",
               encoding="utf-8"
           )
           PY
@@ -2374,23 +3925,111 @@ jobs:
 
           test -s output/stage07/ai_visual_master.mp4
 
+
       # =========================================================
-      # STAGE 08 - NARRACAO DO PLANO DA IA
-      #
-      # Cria UMA voz continua a partir da narracao planejada
-      # para todos os itens da timeline.
+      # STAGE 07 - VALIDAR REGRA DE TEMPO VISUAL
+      # =========================================================
+
+      - name: Stage 07 - Validar Duracao Solicitada
+        shell: bash
+
+        env:
+          USER_TEMPO: ${{ inputs.tempo }}
+
+        run: |
+          set -e
+
+          VISUAL_DURATION=$(ffprobe \
+            -v error \
+            -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 \
+            output/stage07/ai_visual_master.mp4)
+
+          echo "========================================"
+          echo "CONTROLE DE TEMPO"
+          echo "Modo: $USER_TEMPO"
+          echo "Original: $DURATION s"
+          echo "Timeline: $VISUAL_DURATION s"
+          echo "========================================"
+
+          if [ "$USER_TEMPO" = "PRESERVAR" ]; then
+
+            MIN_ALLOWED=$(awk \
+              -v d="$DURATION" \
+              'BEGIN { printf "%.3f", d*0.90 }')
+
+            TOO_SHORT=$(awk \
+              -v v="$VISUAL_DURATION" \
+              -v m="$MIN_ALLOWED" \
+              'BEGIN { if (v < m-0.30) print 1; else print 0 }')
+
+            TOO_LONG=$(awk \
+              -v v="$VISUAL_DURATION" \
+              -v d="$DURATION" \
+              'BEGIN { if (v > d+0.30) print 1; else print 0 }')
+
+            if [ "$TOO_SHORT" = "1" ] || [ "$TOO_LONG" = "1" ]; then
+
+              echo "ERRO: PRESERVAR fora de 90-100%."
+              echo "Minimo: $MIN_ALLOWED s"
+              echo "Maximo: $DURATION s"
+
+              exit 1
+            fi
+
+          elif [ "$USER_TEMPO" = "SHORT_CURTO" ]; then
+
+            MIN_ALLOWED=$(awk \
+              -v d="$DURATION" \
+              'BEGIN { if (d<10) print d; else print 10 }')
+
+            MAX_ALLOWED=$(awk \
+              -v d="$DURATION" \
+              'BEGIN { if (d<20) print d; else print 20 }')
+
+            TOO_SHORT=$(awk \
+              -v v="$VISUAL_DURATION" \
+              -v m="$MIN_ALLOWED" \
+              'BEGIN { if (v < m-0.30) print 1; else print 0 }')
+
+            TOO_LONG=$(awk \
+              -v v="$VISUAL_DURATION" \
+              -v m="$MAX_ALLOWED" \
+              'BEGIN { if (v > m+0.30) print 1; else print 0 }')
+
+            if [ "$TOO_SHORT" = "1" ] || [ "$TOO_LONG" = "1" ]; then
+
+              echo "ERRO: SHORT_CURTO fora da faixa."
+              echo "Minimo: $MIN_ALLOWED s"
+              echo "Maximo: $MAX_ALLOWED s"
+
+              exit 1
+            fi
+
+          fi
+
+          echo "CONTROLE DE TEMPO VALIDADO."
+
+
+      # =========================================================
+      # STAGE 08 - TTS
       # =========================================================
 
       - name: Stage 08 - Instalar TTS
         shell: bash
+
         run: |
           set -e
+
           sudo apt-get update
           sudo apt-get install -y espeak-ng
+
           python3 -m pip install edge-tts gTTS
+
 
       - name: Stage 08 - Montar Texto Continuo
         shell: bash
+
         run: |
           set -e
 
@@ -2398,31 +4037,52 @@ jobs:
 
           python3 - <<'PY'
           import json
-          import os
           from pathlib import Path
 
           plan = json.loads(
-              Path("output/stage06_ai/director_plan.json")
-              .read_text(encoding="utf-8")
+              Path(
+                  "output/stage06_ai/director_plan.json"
+              ).read_text(
+                  encoding="utf-8"
+              )
           )
 
-          mode = plan.get("mode_used", "AUTO")
-          timeline = plan.get("timeline", [])
+          mode = plan.get(
+              "mode_used",
+              "AUTO"
+          )
+
+          timeline = plan.get(
+              "timeline",
+              []
+          )
 
           if mode == "SEM_NARRACAO":
+
               text = ""
+
           else:
+
               parts = []
 
               for item in timeline:
+
                   narration = str(
-                      item.get("narration", "")
+                      item.get(
+                          "narration",
+                          ""
+                      )
                   ).strip()
 
                   if narration:
-                      parts.append(narration)
 
-              text = " ".join(parts).strip()
+                      parts.append(
+                          narration
+                      )
+
+              text = " ".join(
+                  parts
+              ).strip()
 
           Path(
               "output/stage08/narration.txt"
@@ -2434,20 +4094,29 @@ jobs:
           print(text)
           PY
 
+
       - name: Stage 08 - Gerar Voz Continua
         shell: bash
+
         run: |
           set -e
 
           TEXT=$(cat output/stage08/narration.txt)
 
           if [ -z "$TEXT" ]; then
-            echo "SEM_NARRACAO" > output/stage08/tts_engine.txt
-            touch output/stage08/no_narration.flag
+
+            echo "SEM_NARRACAO" \
+              > output/stage08/tts_engine.txt
+
+            touch \
+              output/stage08/no_narration.flag
+
             exit 0
           fi
 
-          rm -f output/stage08/narration_raw.mp3
+          rm -f \
+            output/stage08/narration_raw.mp3
+
 
           if edge-tts \
             --voice pt-BR-AntonioNeural \
@@ -2456,20 +4125,28 @@ jobs:
             --write-media output/stage08/narration_raw.mp3; then
 
             if [ -s output/stage08/narration_raw.mp3 ]; then
-              echo "edge-tts" > output/stage08/tts_engine.txt
+
+              echo "edge-tts" \
+                > output/stage08/tts_engine.txt
+
             fi
           fi
 
+
           if [ ! -s output/stage08/narration_raw.mp3 ]; then
+
             python3 - <<'PY'
           from gtts import gTTS
           from pathlib import Path
 
           text = Path(
               "output/stage08/narration.txt"
-          ).read_text(encoding="utf-8")
+          ).read_text(
+              encoding="utf-8"
+          )
 
           try:
+
               gTTS(
                   text=text,
                   lang="pt",
@@ -2478,16 +4155,23 @@ jobs:
               ).save(
                   "output/stage08/narration_raw.mp3"
               )
+
           except Exception as exc:
+
               print(exc)
           PY
 
             if [ -s output/stage08/narration_raw.mp3 ]; then
-              echo "gTTS" > output/stage08/tts_engine.txt
+
+              echo "gTTS" \
+                > output/stage08/tts_engine.txt
+
             fi
           fi
 
+
           if [ ! -s output/stage08/narration_raw.mp3 ]; then
+
             espeak-ng \
               -v pt-br \
               -s 158 \
@@ -2500,32 +4184,37 @@ jobs:
               -b:a 160k \
               output/stage08/narration_raw.mp3
 
-            echo "espeak-ng" > output/stage08/tts_engine.txt
+            echo "espeak-ng" \
+              > output/stage08/tts_engine.txt
+
           fi
 
-          test -s output/stage08/narration_raw.mp3
+          test -s \
+            output/stage08/narration_raw.mp3
+
 
       # =========================================================
       # STAGE 08 - FIT GLOBAL
-      #
-      # Se a voz ficar maior que o video:
-      # - ajusta a velocidade de forma suave, no maximo 15%
-      # - se ainda ficar maior, FALHA em vez de congelar imagem
-      #
-      # Isso obriga o AI Director a trabalhar dentro do tempo real.
       # =========================================================
 
       - name: Stage 08 - Ajustar Voz ao Master Visual
         shell: bash
+
+        env:
+          USER_TEMPO: ${{ inputs.tempo }}
+
         run: |
           set -e
 
           if [ -f output/stage08/no_narration.flag ]; then
+
             cp \
               output/stage07/ai_visual_master.mp4 \
               output/stage08/final_ai_director.mp4
+
             exit 0
           fi
+
 
           VIDEO_DURATION=$(ffprobe \
             -v error \
@@ -2533,24 +4222,29 @@ jobs:
             -of default=noprint_wrappers=1:nokey=1 \
             output/stage07/ai_visual_master.mp4)
 
+
           AUDIO_DURATION=$(ffprobe \
             -v error \
             -show_entries format=duration \
             -of default=noprint_wrappers=1:nokey=1 \
             output/stage08/narration_raw.mp3)
 
+
           RATIO=$(awk \
             -v a="$AUDIO_DURATION" \
             -v v="$VIDEO_DURATION" \
             'BEGIN { printf "%.6f", a/v }')
 
-          TEMPO=$(awk -v r="$RATIO" '
+
+          TEMPO=$(awk \
+            -v r="$RATIO" '
             BEGIN {
               if (r <= 1.00) t=1.00;
               else if (r <= 1.15) t=r;
               else t=1.15;
               printf "%.6f", t
             }')
+
 
           ffmpeg -y \
             -i output/stage08/narration_raw.mp3 \
@@ -2559,64 +4253,133 @@ jobs:
             -b:a 160k \
             output/stage08/narration_master.m4a
 
+
           FITTED_AUDIO=$(ffprobe \
             -v error \
             -show_entries format=duration \
             -of default=noprint_wrappers=1:nokey=1 \
             output/stage08/narration_master.m4a)
 
+
           TOO_LONG=$(awk \
             -v a="$FITTED_AUDIO" \
             -v v="$VIDEO_DURATION" \
             'BEGIN { if (a > v + 0.35) print 1; else print 0 }')
 
+
+          echo "========================================"
+          echo "FIT DE NARRACAO"
+          echo "Modo tempo: $USER_TEMPO"
           echo "Duracao visual: $VIDEO_DURATION s"
-          echo "Duracao voz original: $AUDIO_DURATION s"
-          echo "Atempo aplicado: $TEMPO"
-          echo "Duracao voz ajustada: $FITTED_AUDIO s"
+          echo "Voz original: $AUDIO_DURATION s"
+          echo "Atempo: $TEMPO"
+          echo "Voz ajustada: $FITTED_AUDIO s"
+          echo "========================================"
+
 
           if [ "$TOO_LONG" = "1" ]; then
-            echo "AVISO: narracao maior que a timeline visual gerada pela IA."
-            echo "Ativando fallback visual seguro com o Editorial Master completo."
-            echo "Nao sera usado freeze frame."
 
-            SOURCE_DURATION=$(ffprobe \
-              -v error \
-              -show_entries format=duration \
-              -of default=noprint_wrappers=1:nokey=1 \
-              output/editorial_master.mp4)
 
-            CAN_FIT=$(awk \
-              -v a="$FITTED_AUDIO" \
-              -v s="$SOURCE_DURATION" \
-              'BEGIN { if (a <= s + 0.35) print 1; else print 0 }')
+            # ===================================================
+            # SHORT_CURTO
+            #
+            # NUNCA pode cair para o video original inteiro.
+            # ===================================================
 
-            if [ "$CAN_FIT" = "1" ]; then
-              echo "Editorial Master disponivel: $SOURCE_DURATION s"
-              echo "Voz ajustada: $FITTED_AUDIO s"
-              echo "Fallback: preservando a ordem original do visual limpo para manter coerencia com as legendas."
+            if [ "$USER_TEMPO" = "SHORT_CURTO" ]; then
 
-              cp \
-                output/editorial_master.mp4 \
-                output/stage07/ai_visual_master_fallback.mp4
+              echo "ERRO: narracao maior que o SHORT_CURTO."
+              echo "O fallback para o video original foi BLOQUEADO"
+              echo "para nao transformar um Short de 10-20 s"
+              echo "em um video longo."
 
-              VIDEO_DURATION="$FITTED_AUDIO"
-
-              echo "Fallback visual ativado com sucesso."
-            else
-              echo "ERRO: nem o Editorial Master completo comporta a narracao."
-              echo "Duracao fonte: $SOURCE_DURATION s"
-              echo "Duracao voz ajustada: $FITTED_AUDIO s"
-              echo "O plano precisa de narracao mais curta."
               exit 1
+
+
+            # ===================================================
+            # AUTO / PRESERVAR
+            # ===================================================
+
+            else
+
+              echo "AVISO: narracao maior que timeline."
+              echo "Tentando fallback visual seguro."
+
+
+              SOURCE_DURATION=$(ffprobe \
+                -v error \
+                -show_entries format=duration \
+                -of default=noprint_wrappers=1:nokey=1 \
+                output/editorial_master.mp4)
+
+
+              CAN_FIT=$(awk \
+                -v a="$FITTED_AUDIO" \
+                -v s="$SOURCE_DURATION" \
+                'BEGIN { if (a <= s + 0.35) print 1; else print 0 }')
+
+
+              if [ "$CAN_FIT" = "1" ]; then
+
+
+                # -----------------------------------------------
+                # PRESERVAR
+                #
+                # Fallback para fonte inteira e permitido,
+                # porque continua dentro de 100% do original.
+                # -----------------------------------------------
+
+                if [ "$USER_TEMPO" = "PRESERVAR" ]; then
+
+                  cp \
+                    output/editorial_master.mp4 \
+                    output/stage07/ai_visual_master_fallback.mp4
+
+                  VIDEO_DURATION="$SOURCE_DURATION"
+
+                  echo "PRESERVAR: Editorial Master completo ativado."
+
+
+                # -----------------------------------------------
+                # AUTO - comportamento anterior
+                # -----------------------------------------------
+
+                else
+
+                  cp \
+                    output/editorial_master.mp4 \
+                    output/stage07/ai_visual_master_fallback.mp4
+
+                  VIDEO_DURATION="$FITTED_AUDIO"
+
+                  echo "AUTO: fallback visual ativado."
+
+                fi
+
+
+              else
+
+                echo "ERRO: nem o Editorial Master completo"
+                echo "comporta a narracao."
+
+                exit 1
+
+              fi
+
             fi
+
           fi
+
 
           VISUAL_INPUT="output/stage07/ai_visual_master.mp4"
 
+
           if [ -s output/stage07/ai_visual_master_fallback.mp4 ]; then
+
             VISUAL_INPUT="output/stage07/ai_visual_master_fallback.mp4"
+
           fi
+
 
           ffmpeg -y \
             -i "$VISUAL_INPUT" \
@@ -2631,27 +4394,110 @@ jobs:
             -movflags +faststart \
             output/stage08/final_ai_director.mp4
 
-          test -s output/stage08/final_ai_director.mp4
+
+          test -s \
+            output/stage08/final_ai_director.mp4
+
+
+      # =========================================================
+      # STAGE 08 - VALIDAR TEMPO FINAL
+      # =========================================================
+
+      - name: Stage 08 - Validar Tempo Final
+        shell: bash
+
+        env:
+          USER_TEMPO: ${{ inputs.tempo }}
+
+        run: |
+          set -e
+
+          FINAL_DURATION=$(ffprobe \
+            -v error \
+            -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 \
+            output/stage08/final_ai_director.mp4)
+
+
+          echo "========================================"
+          echo "TEMPO FINAL ANTES DO POLISH"
+          echo "Modo: $USER_TEMPO"
+          echo "Original: $DURATION s"
+          echo "Final: $FINAL_DURATION s"
+          echo "========================================"
+
+
+          if [ "$USER_TEMPO" = "PRESERVAR" ]; then
+
+            MIN_ALLOWED=$(awk \
+              -v d="$DURATION" \
+              'BEGIN { printf "%.3f", d*0.90 }')
+
+            INVALID=$(awk \
+              -v f="$FINAL_DURATION" \
+              -v min="$MIN_ALLOWED" \
+              -v max="$DURATION" \
+              'BEGIN {
+                if (f < min-0.35 || f > max+0.35)
+                  print 1;
+                else
+                  print 0
+              }')
+
+            if [ "$INVALID" = "1" ]; then
+
+              echo "ERRO: final fora de 90-100%."
+              exit 1
+
+            fi
+
+
+          elif [ "$USER_TEMPO" = "SHORT_CURTO" ]; then
+
+            MIN_ALLOWED=$(awk \
+              -v d="$DURATION" \
+              'BEGIN {
+                if (d < 10) print d;
+                else print 10
+              }')
+
+            MAX_ALLOWED=$(awk \
+              -v d="$DURATION" \
+              'BEGIN {
+                if (d < 20) print d;
+                else print 20
+              }')
+
+            INVALID=$(awk \
+              -v f="$FINAL_DURATION" \
+              -v min="$MIN_ALLOWED" \
+              -v max="$MAX_ALLOWED" \
+              'BEGIN {
+                if (f < min-0.35 || f > max+0.35)
+                  print 1;
+                else
+                  print 0
+              }')
+
+            if [ "$INVALID" = "1" ]; then
+
+              echo "ERRO: Short fora da faixa 10-20 s."
+              exit 1
+
+            fi
+
+          fi
+
+          echo "TEMPO FINAL VALIDADO."
+
 
       # =========================================================
       # STAGE 09 - ACABAMENTO VISUAL CONSERVADOR
-      #
-      # OBJETIVO:
-      # - melhorar nitidez percebida e acabamento
-      # - dar leve ganho de contraste e saturacao
-      # - manter narracao EXATAMENTE como saiu do Stage 08
-      # - manter legenda original queimada no video
-      # - manter duracao, cortes, ordem e sincronismo
-      #
-      # IMPORTANTE:
-      # - NAO altera velocidade
-      # - NAO cria transicoes que encurtem a timeline
-      # - NAO aplica zoom/crop global que possa cortar legenda
-      # - NAO mexe no audio
       # =========================================================
 
       - name: Stage 09 - Aplicar Acabamento Visual
         shell: bash
+
         run: |
           set -e
 
@@ -2669,7 +4515,9 @@ jobs:
             "$INPUT")
 
           if [ -z "$VIDEO_DURATION" ]; then
+
             echo "ERRO: duracao do Stage 08 nao identificada."
+
             exit 1
           fi
 
@@ -2681,11 +4529,13 @@ jobs:
             "$INPUT" \
             | wc -l)
 
+
           echo "========================================"
           echo "STAGE 09 - ACABAMENTO VISUAL"
-          echo "Duracao de entrada: $VIDEO_DURATION s"
-          echo "Audio detectado: $AUDIO_COUNT stream(s)"
+          echo "Duracao entrada: $VIDEO_DURATION s"
+          echo "Audio: $AUDIO_COUNT stream(s)"
           echo "========================================"
+
 
           if [ "$AUDIO_COUNT" -gt 0 ]; then
 
@@ -2724,8 +4574,10 @@ jobs:
 
           test -s "$OUTPUT"
 
+
       - name: Stage 09 - Validar Acabamento Visual
         shell: bash
+
         run: |
           set -e
 
@@ -2788,78 +4640,74 @@ jobs:
 
           DURATION_BAD=$(awk \
             -v d="$DURATION_DIFF" \
-            'BEGIN { if (d > 0.10) print 1; else print 0 }')
+            'BEGIN {
+              if (d > 0.10) print 1;
+              else print 0
+            }')
 
           if [ "$WIDTH" != "1080" ] || [ "$HEIGHT" != "1920" ]; then
+
             echo "ERRO: Stage 09 fora de 1080x1920."
             exit 1
+
           fi
 
           if [ "$DURATION_BAD" = "1" ]; then
-            echo "ERRO: Stage 09 alterou a duracao."
-            echo "Entrada: $IN_DURATION s"
-            echo "Saida:   $OUT_DURATION s"
+
+            echo "ERRO: Stage 09 alterou duracao."
             exit 1
+
           fi
 
           if [ "$IN_AUDIO" != "$OUT_AUDIO" ]; then
-            echo "ERRO: Stage 09 alterou a quantidade de streams de audio."
+
+            echo "ERRO: Stage 09 alterou streams de audio."
             exit 1
+
           fi
 
+
           echo "========================================"
-          echo "STAGE 09 ACABAMENTO VISUAL VALIDADO"
+          echo "STAGE 09 VALIDADO"
           echo "Resolucao: 1080x1920"
           echo "Duracao preservada: SIM"
           echo "Audio preservado: SIM"
           echo "Narracao reprocessada: NAO"
           echo "Legenda original preservada: SIM"
-          echo "Zoom/crop adicional: NAO"
           echo "Trilha sonora: NAO"
           echo "========================================"
 
+
       - name: Disponibilizar Stage 09 Acabamento Visual
         uses: actions/upload-artifact@v4
+
         with:
           name: stage-09-visual-polish
+
           path: |
             output/stage09/final_visual_polish.mp4
+
           retention-days: 7
+
           if-no-files-found: error
 
+
       # =========================================================
-      # STAGE 10 - QA TECNICO AUTOMATICO
-      #
-      # Valida o master final sem alterar imagem ou audio.
-      #
-      # HARD FAIL:
-      # - arquivo ausente/corrompido
-      # - resolucao diferente de 1080x1920
-      # - codec de video inesperado
-      # - fps fora do esperado
-      # - duracao alterada
-      # - audio ausente quando deveria existir
-      # - audio praticamente inaudivel
-      # - erro de decodificacao
-      #
-      # SO RELATORIO:
-      # - quadros congelados
-      # - trechos pretos
-      # - silêncios
-      #
-      # Ao final, copia o video APROVADO para:
-      # output/stage10/final_master.mp4
+      # STAGE 10 - QA
       # =========================================================
 
       - name: Stage 10 - Executar QA Tecnico
         shell: bash
+
         run: |
           set -e
 
           mkdir -p output/stage10
 
           INPUT="output/stage09/final_visual_polish.mp4"
+
           REFERENCE="output/stage08/final_ai_director.mp4"
+
           REPORT="output/stage10/qa_report.txt"
 
           test -s "$INPUT"
@@ -2870,9 +4718,6 @@ jobs:
           echo "PARECE MENTIRA - QA TECNICO AUTOMATICO" | tee -a "$REPORT"
           echo "========================================" | tee -a "$REPORT"
 
-          # -----------------------------------------------------
-          # METADADOS PRINCIPAIS
-          # -----------------------------------------------------
 
           WIDTH=$(ffprobe \
             -v error \
@@ -2913,11 +4758,13 @@ jobs:
             -v r="$FPS_RAW" \
             'BEGIN {
               split(r,a,"/");
-              if (a[2] == 0 || a[2] == "") print 0;
-              else printf "%.3f", a[1]/a[2]
+              if (a[2] == 0 || a[2] == "")
+                print 0;
+              else
+                printf "%.3f", a[1]/a[2]
             }')
 
-          DURATION=$(ffprobe \
+          DURATION_FINAL=$(ffprobe \
             -v error \
             -show_entries format=duration \
             -of default=noprint_wrappers=1:nokey=1 \
@@ -2939,48 +4786,66 @@ jobs:
             "$INPUT" \
             | wc -l)
 
+
           echo "Resolucao: ${WIDTH}x${HEIGHT}" | tee -a "$REPORT"
           echo "Codec video: $CODEC" | tee -a "$REPORT"
           echo "Pixel format: $PIX_FMT" | tee -a "$REPORT"
           echo "FPS: $FPS" | tee -a "$REPORT"
-          echo "Duracao final: $DURATION s" | tee -a "$REPORT"
+          echo "Duracao final: $DURATION_FINAL s" | tee -a "$REPORT"
           echo "Duracao referencia: $REF_DURATION s" | tee -a "$REPORT"
+          echo "Modo tempo: ${{ inputs.tempo }}" | tee -a "$REPORT"
           echo "Tamanho: $SIZE_BYTES bytes" | tee -a "$REPORT"
           echo "Streams de audio: $AUDIO_COUNT" | tee -a "$REPORT"
 
-          # -----------------------------------------------------
-          # HARD FAILS - VIDEO
-          # -----------------------------------------------------
 
           if [ "$WIDTH" != "1080" ] || [ "$HEIGHT" != "1920" ]; then
-            echo "FAIL: resolucao diferente de 1080x1920." | tee -a "$REPORT"
+
+            echo "FAIL: resolucao diferente de 1080x1920." \
+              | tee -a "$REPORT"
+
             exit 1
           fi
+
 
           if [ "$CODEC" != "h264" ]; then
-            echo "FAIL: codec de video inesperado ($CODEC)." | tee -a "$REPORT"
+
+            echo "FAIL: codec inesperado ($CODEC)." \
+              | tee -a "$REPORT"
+
             exit 1
           fi
 
+
           if [ "$PIX_FMT" != "yuv420p" ]; then
-            echo "FAIL: pixel format inesperado ($PIX_FMT)." | tee -a "$REPORT"
+
+            echo "FAIL: pixel format inesperado." \
+              | tee -a "$REPORT"
+
             exit 1
           fi
+
 
           FPS_BAD=$(awk \
             -v f="$FPS" \
             'BEGIN {
-              if (f < 29.0 || f > 31.0) print 1;
-              else print 0
+              if (f < 29.0 || f > 31.0)
+                print 1;
+              else
+                print 0
             }')
 
+
           if [ "$FPS_BAD" = "1" ]; then
-            echo "FAIL: FPS fora da faixa esperada." | tee -a "$REPORT"
+
+            echo "FAIL: FPS fora da faixa." \
+              | tee -a "$REPORT"
+
             exit 1
           fi
 
+
           DUR_DIFF=$(awk \
-            -v a="$DURATION" \
+            -v a="$DURATION_FINAL" \
             -v b="$REF_DURATION" \
             'BEGIN {
               d=a-b;
@@ -2988,26 +4853,37 @@ jobs:
               printf "%.6f", d
             }')
 
+
           DUR_BAD=$(awk \
             -v d="$DUR_DIFF" \
             'BEGIN {
-              if (d > 0.12) print 1;
-              else print 0
+              if (d > 0.12)
+                print 1;
+              else
+                print 0
             }')
 
+
           if [ "$DUR_BAD" = "1" ]; then
-            echo "FAIL: duracao mudou mais de 0.12s." | tee -a "$REPORT"
-            echo "Diferenca: $DUR_DIFF s" | tee -a "$REPORT"
+
+            echo "FAIL: duracao mudou mais de 0.12s." \
+              | tee -a "$REPORT"
+
             exit 1
           fi
+
 
           if [ "$SIZE_BYTES" -lt 500000 ]; then
-            echo "FAIL: arquivo final pequeno demais." | tee -a "$REPORT"
+
+            echo "FAIL: arquivo final pequeno demais." \
+              | tee -a "$REPORT"
+
             exit 1
           fi
 
+
           # -----------------------------------------------------
-          # HARD FAIL - DECODIFICACAO
+          # DECODIFICACAO
           # -----------------------------------------------------
 
           ffmpeg \
@@ -3016,28 +4892,46 @@ jobs:
             -f null - \
             2> output/stage10/decode_errors.txt || true
 
+
           if [ -s output/stage10/decode_errors.txt ]; then
-            echo "FAIL: FFmpeg encontrou erro de decodificacao." | tee -a "$REPORT"
-            cat output/stage10/decode_errors.txt | tee -a "$REPORT"
+
+            echo "FAIL: erro de decodificacao." \
+              | tee -a "$REPORT"
+
+            cat output/stage10/decode_errors.txt \
+              | tee -a "$REPORT"
+
             exit 1
           fi
 
-          echo "Decodificacao integral: OK" | tee -a "$REPORT"
+
+          echo "Decodificacao integral: OK" \
+            | tee -a "$REPORT"
+
 
           # -----------------------------------------------------
           # AUDIO
           # -----------------------------------------------------
 
           if [ -f output/stage08/no_narration.flag ]; then
+
             EXPECT_AUDIO=0
+
           else
+
             EXPECT_AUDIO=1
+
           fi
 
+
           if [ "$EXPECT_AUDIO" = "1" ] && [ "$AUDIO_COUNT" -lt 1 ]; then
-            echo "FAIL: narracao esperada, mas audio ausente." | tee -a "$REPORT"
+
+            echo "FAIL: narracao esperada, audio ausente." \
+              | tee -a "$REPORT"
+
             exit 1
           fi
+
 
           if [ "$AUDIO_COUNT" -gt 0 ]; then
 
@@ -3073,34 +4967,55 @@ jobs:
               | sed -n 's/.*max_volume: \([-0-9.]*\) dB.*/\1/p' \
               | tail -1)
 
-            echo "Codec audio: $AUDIO_CODEC" | tee -a "$REPORT"
-            echo "Duracao audio: ${AUDIO_DURATION:-indisponivel} s" | tee -a "$REPORT"
-            echo "Volume medio: ${MEAN_VOLUME:-indisponivel} dB" | tee -a "$REPORT"
-            echo "Pico de audio: ${MAX_VOLUME:-indisponivel} dB" | tee -a "$REPORT"
+
+            echo "Codec audio: $AUDIO_CODEC" \
+              | tee -a "$REPORT"
+
+            echo "Duracao audio: ${AUDIO_DURATION:-indisponivel} s" \
+              | tee -a "$REPORT"
+
+            echo "Volume medio: ${MEAN_VOLUME:-indisponivel} dB" \
+              | tee -a "$REPORT"
+
+            echo "Pico audio: ${MAX_VOLUME:-indisponivel} dB" \
+              | tee -a "$REPORT"
+
 
             if [ -n "$MEAN_VOLUME" ]; then
+
               TOO_QUIET=$(awk \
                 -v v="$MEAN_VOLUME" \
                 'BEGIN {
-                  if (v < -38.0) print 1;
-                  else print 0
+                  if (v < -38.0)
+                    print 1;
+                  else
+                    print 0
                 }')
 
               if [ "$TOO_QUIET" = "1" ]; then
-                echo "FAIL: audio praticamente inaudivel." | tee -a "$REPORT"
+
+                echo "FAIL: audio praticamente inaudivel." \
+                  | tee -a "$REPORT"
+
                 exit 1
               fi
             fi
-
           fi
 
+
           # -----------------------------------------------------
-          # DIAGNOSTICOS - NAO BLOQUEIAM O MASTER
+          # DIAGNOSTICOS
           # -----------------------------------------------------
 
-          echo "" | tee -a "$REPORT"
-          echo "DIAGNOSTICOS VISUAIS" | tee -a "$REPORT"
-          echo "----------------------------------------" | tee -a "$REPORT"
+          echo "" \
+            | tee -a "$REPORT"
+
+          echo "DIAGNOSTICOS VISUAIS" \
+            | tee -a "$REPORT"
+
+          echo "----------------------------------------" \
+            | tee -a "$REPORT"
+
 
           ffmpeg \
             -hide_banner \
@@ -3110,14 +5025,19 @@ jobs:
             -f null - \
             2> output/stage10/freezedetect_raw.txt || true
 
+
           grep -E "freeze_(start|duration|end)" \
             output/stage10/freezedetect_raw.txt \
             > output/stage10/freezes.txt || true
 
+
           FREEZE_COUNT=$(grep -c "freeze_start" \
             output/stage10/freezes.txt || true)
 
-          echo "Eventos de freeze >=2.5s: $FREEZE_COUNT" | tee -a "$REPORT"
+
+          echo "Eventos freeze >=2.5s: $FREEZE_COUNT" \
+            | tee -a "$REPORT"
+
 
           ffmpeg \
             -hide_banner \
@@ -3127,13 +5047,19 @@ jobs:
             -f null - \
             2> output/stage10/blackdetect_raw.txt || true
 
+
           grep "black_start" \
             output/stage10/blackdetect_raw.txt \
             > output/stage10/black_frames.txt || true
 
-          BLACK_COUNT=$(wc -l < output/stage10/black_frames.txt)
 
-          echo "Trechos pretos >=1s: $BLACK_COUNT" | tee -a "$REPORT"
+          BLACK_COUNT=$(wc -l \
+            < output/stage10/black_frames.txt)
+
+
+          echo "Trechos pretos >=1s: $BLACK_COUNT" \
+            | tee -a "$REPORT"
+
 
           if [ "$AUDIO_COUNT" -gt 0 ]; then
 
@@ -3145,23 +5071,28 @@ jobs:
               -f null - \
               2> output/stage10/silencedetect_raw.txt || true
 
+
             grep -E "silence_(start|end|duration)" \
               output/stage10/silencedetect_raw.txt \
               > output/stage10/silences.txt || true
 
+
             SILENCE_COUNT=$(grep -c "silence_start" \
               output/stage10/silences.txt || true)
 
-            echo "Silencios >=2s: $SILENCE_COUNT" | tee -a "$REPORT"
+
+            echo "Silencios >=2s: $SILENCE_COUNT" \
+              | tee -a "$REPORT"
 
           else
+
             : > output/stage10/silences.txt
-            echo "Silencios: N/A (video sem audio)" | tee -a "$REPORT"
+
+            echo "Silencios: N/A" \
+              | tee -a "$REPORT"
+
           fi
 
-          # -----------------------------------------------------
-          # FRAME COUNT
-          # -----------------------------------------------------
 
           FRAME_COUNT=$(ffprobe \
             -v error \
@@ -3171,38 +5102,56 @@ jobs:
             -of default=noprint_wrappers=1:nokey=1 \
             "$INPUT")
 
+
           EXPECTED_FRAMES=$(awk \
-            -v d="$DURATION" \
+            -v d="$DURATION_FINAL" \
             -v f="$FPS" \
             'BEGIN {
               printf "%.0f", d*f
             }')
 
-          echo "Frames lidos: $FRAME_COUNT" | tee -a "$REPORT"
-          echo "Frames esperados aprox.: $EXPECTED_FRAMES" | tee -a "$REPORT"
 
-          # -----------------------------------------------------
-          # APROVACAO FINAL
-          # -----------------------------------------------------
+          echo "Frames lidos: $FRAME_COUNT" \
+            | tee -a "$REPORT"
 
-          cp "$INPUT" output/stage10/final_master.mp4
+          echo "Frames esperados aprox.: $EXPECTED_FRAMES" \
+            | tee -a "$REPORT"
 
-          test -s output/stage10/final_master.mp4
+
+          cp \
+            "$INPUT" \
+            output/stage10/final_master.mp4
+
+
+          test -s \
+            output/stage10/final_master.mp4
+
 
           echo "" | tee -a "$REPORT"
           echo "========================================" | tee -a "$REPORT"
           echo "RESULTADO: APROVADO" | tee -a "$REPORT"
-          echo "Master final: output/stage10/final_master.mp4" | tee -a "$REPORT"
+          echo "Master: output/stage10/final_master.mp4" | tee -a "$REPORT"
           echo "========================================" | tee -a "$REPORT"
+
+
+      # =========================================================
+      # QA JSON
+      # =========================================================
 
       - name: Stage 10 - Criar Relatorio JSON
         shell: bash
+
+        env:
+          USER_TEMPO: ${{ inputs.tempo }}
+
         run: |
           set -e
 
           python3 - <<'PY'
           import json
+          import os
           import subprocess
+
           from pathlib import Path
 
           video = Path(
@@ -3210,6 +5159,7 @@ jobs:
           )
 
           def probe(args):
+
               return subprocess.check_output(
                   args,
                   text=True
@@ -3218,9 +5168,12 @@ jobs:
           duration = float(
               probe([
                   "ffprobe",
-                  "-v", "error",
-                  "-show_entries", "format=duration",
-                  "-of", "default=noprint_wrappers=1:nokey=1",
+                  "-v",
+                  "error",
+                  "-show_entries",
+                  "format=duration",
+                  "-of",
+                  "default=noprint_wrappers=1:nokey=1",
                   str(video)
               ])
           )
@@ -3228,10 +5181,14 @@ jobs:
           width = int(
               probe([
                   "ffprobe",
-                  "-v", "error",
-                  "-select_streams", "v:0",
-                  "-show_entries", "stream=width",
-                  "-of", "csv=p=0",
+                  "-v",
+                  "error",
+                  "-select_streams",
+                  "v:0",
+                  "-show_entries",
+                  "stream=width",
+                  "-of",
+                  "csv=p=0",
                   str(video)
               ])
           )
@@ -3239,10 +5196,14 @@ jobs:
           height = int(
               probe([
                   "ffprobe",
-                  "-v", "error",
-                  "-select_streams", "v:0",
-                  "-show_entries", "stream=height",
-                  "-of", "csv=p=0",
+                  "-v",
+                  "error",
+                  "-select_streams",
+                  "v:0",
+                  "-show_entries",
+                  "stream=height",
+                  "-of",
+                  "csv=p=0",
                   str(video)
               ])
           )
@@ -3269,19 +5230,49 @@ jobs:
           ).splitlines()
 
           report = {
-              "status": "APROVADO",
-              "master": "final_master.mp4",
+              "status":
+                  "APROVADO",
+
+              "master":
+                  "final_master.mp4",
+
               "resolution": {
-                  "width": width,
-                  "height": height
+                  "width":
+                      width,
+
+                  "height":
+                      height
               },
-              "duration_seconds": round(duration, 3),
-              "freeze_events_raw": freezes,
-              "black_events_raw": blacks,
-              "silence_events_raw": silences,
-              "music": False,
-              "visual_polish": True,
-              "narration_preserved": True
+
+              "duration_seconds":
+                  round(
+                      duration,
+                      3
+                  ),
+
+              "tempo_mode":
+                  os.getenv(
+                      "USER_TEMPO",
+                      "AUTO"
+                  ),
+
+              "freeze_events_raw":
+                  freezes,
+
+              "black_events_raw":
+                  blacks,
+
+              "silence_events_raw":
+                  silences,
+
+              "music":
+                  False,
+
+              "visual_polish":
+                  True,
+
+              "narration_preserved":
+                  True
           }
 
           Path(
@@ -3298,10 +5289,17 @@ jobs:
 
           test -s output/stage10/qa_report.json
 
+
+      # =========================================================
+      # ARTIFACT STAGE 10
+      # =========================================================
+
       - name: Disponibilizar Stage 10 QA e Master Final
         uses: actions/upload-artifact@v4
+
         with:
           name: stage-10-final-master-qa
+
           path: |
             output/stage10/final_master.mp4
             output/stage10/qa_report.txt
@@ -3310,19 +5308,24 @@ jobs:
             output/stage10/freezes.txt
             output/stage10/black_frames.txt
             output/stage10/silences.txt
+
           retention-days: 7
+
           if-no-files-found: error
 
+
       # =========================================================
-      # APP - PUBLICAR RESULTADO NA RELEASE TEMPORARIA
+      # APP - PUBLICAR RESULTADO
       # =========================================================
 
       - name: App - Publicar master final
         if: ${{ success() && inputs.app_job_tag != '' }}
         shell: bash
+
         env:
           GH_TOKEN: ${{ github.token }}
           APP_JOB_TAG: ${{ inputs.app_job_tag }}
+
         run: |
           set -e
 
@@ -3335,12 +5338,15 @@ jobs:
             --repo "${{ github.repository }}" \
             --clobber
 
+
       - name: App - Publicar marcador de falha
         if: ${{ failure() && inputs.app_job_tag != '' }}
         shell: bash
+
         env:
           GH_TOKEN: ${{ github.token }}
           APP_JOB_TAG: ${{ inputs.app_job_tag }}
+
         run: |
           set +e
 
@@ -3351,7 +5357,8 @@ jobs:
             "status": "ERRO",
             "job_tag": "${APP_JOB_TAG}",
             "run_id": "${{ github.run_id }}",
-            "run_attempt": "${{ github.run_attempt }}"
+            "run_attempt": "${{ github.run_attempt }}",
+            "tempo": "${{ inputs.tempo }}"
           }
           EOF
 
@@ -3360,12 +5367,17 @@ jobs:
             --repo "${{ github.repository }}" \
             --clobber || true
 
+
       # =========================================================
-      # VALIDAR V15
+      # VALIDACAO FINAL
       # =========================================================
 
-      - name: Validar V15 AI Director
+      - name: Validar V15.24 Tempo Control
         shell: bash
+
+        env:
+          USER_TEMPO: ${{ inputs.tempo }}
+
         run: |
           set -e
 
@@ -3388,25 +5400,41 @@ jobs:
             -of csv=p=0 \
             output/stage10/final_master.mp4)
 
+          FINAL_DURATION=$(ffprobe \
+            -v error \
+            -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 \
+            output/stage10/final_master.mp4)
+
+
           if [ "$WIDTH" != "1080" ] || [ "$HEIGHT" != "1920" ]; then
+
             echo "ERRO: final fora de 1080x1920."
+
             exit 1
           fi
 
+
           echo "========================================"
-          echo "V15.21 VISION FRAME FIX VALIDADO"
+          echo "V15.24 TEMPO CONTROL VALIDADO"
           echo "Vision: OK"
-          echo "Prompt opcional: OK"
-          echo "Video sem narracao: suportado"
-          echo "Diretor multimodal Gemini: suportado"
-          echo "Plano manual sem IA: suportado"
-          echo "Reuso de plano aprovado sem Gemini: suportado"
-          echo "Legenda original preservada como ancora semantica: suportado"
+          echo "Video sem narracao: SUPORTADO"
+          echo "Gemini multimodal: SUPORTADO"
+          echo "Idioma automatico: SUPORTADO"
+          echo "Traducao narracao PT-BR: SUPORTADO"
+          echo "Legenda original preservada: SIM"
           echo "Trilha sonora: DESATIVADA"
-          echo "Acabamento visual conservador: suportado"
-          echo "QA tecnico automatico: suportado"
-          echo "Freeze final: removido"
+          echo "Acabamento visual: APROVADO"
+          echo "QA tecnico: APROVADO"
+          echo "Freeze final: REMOVIDO"
+          echo "Modo tempo: $USER_TEMPO"
+          echo "Duracao original: $DURATION s"
+          echo "Duracao final: $FINAL_DURATION s"
+          echo "AUTO: SUPORTADO"
+          echo "SHORT_CURTO 10-20 s: SUPORTADO"
+          echo "PRESERVAR 90-100%: SUPORTADO"
           echo "========================================"
+
 
       # =========================================================
       # ARTIFACTS
@@ -3414,16 +5442,24 @@ jobs:
 
       - name: Disponibilizar Stage 01
         uses: actions/upload-artifact@v4
+
         with:
           name: stage-01-clean-master
-          path: output/clean_master.mp4
+
+          path:
+            output/clean_master.mp4
+
           retention-days: 7
+
           if-no-files-found: error
+
 
       - name: Disponibilizar Stage 03-05
         uses: actions/upload-artifact@v4
+
         with:
           name: stage-05-understanding
+
           path: |
             output/scene_report.txt
             output/edit_plan.csv
@@ -3431,46 +5467,67 @@ jobs:
             output/stage05/transcript.json
             output/stage05/scene_manifest.json
             output/stage05/scene_manifest.txt
+
           retention-days: 7
+
           if-no-files-found: error
+
 
       - name: Disponibilizar Vision Pack
         uses: actions/upload-artifact@v4
+
         with:
           name: stage-06-vision-pack
+
           path: |
             output/stage06_vision/sheets/*.jpg
+
           retention-days: 7
+
           if-no-files-found: error
+
 
       - name: Disponibilizar AI Director
         uses: actions/upload-artifact@v4
+
         with:
           name: stage-06-gemini-ai-director
+
           path: |
             output/stage06_ai/director_plan.json
             output/stage06_ai/director_raw.txt
             output/stage06_ai/provider.txt
+
           retention-days: 7
+
           if-no-files-found: error
+
 
       - name: Disponibilizar Incremento
         uses: actions/upload-artifact@v4
+
         with:
           name: stage-07-ai-increment
+
           path: |
             output/stage07/increment_base.png
             output/stage07/increment.mp4
             output/stage07/increment_none.txt
+
           retention-days: 7
+
           if-no-files-found: warn
 
-      - name: Disponibilizar Final V15
+
+      - name: Disponibilizar Final V15.24
         uses: actions/upload-artifact@v4
+
         with:
           name: stage-08-final
+
           path: |
             output/stage07/ai_visual_master.mp4
+            output/stage07/ai_visual_master_fallback.mp4
             output/stage08/narration.txt
             output/stage08/tts_engine.txt
             output/stage08/narration_raw.mp3
@@ -3482,5 +5539,7 @@ jobs:
             output/stage10/qa_report.json
             output/stage06_ai/director_plan.json
             output/stage06_ai/provider.txt
+
           retention-days: 7
+
           if-no-files-found: warn
