@@ -1,13 +1,11 @@
 // ------------------------------------------------------------
-// PARECE MENTIRA - FRONTEND PWA V4
+// PARECE MENTIRA - FRONTEND PWA V5
 // Cloudflare Worker -> GitHub Actions -> Final Master
 //
-// V4:
+// V5:
 // - Narracao
-// - Tempo:
-//     AUTO
-//     SHORT_CURTO
-//     PRESERVAR
+// - Tempo
+// - Posicao da logo
 // - Processamento
 // - Polling resiliente
 // - Download final com retentativas
@@ -110,7 +108,7 @@ function getAppKey() {
 
 
 // ============================================================
-// STATUS DO BACKEND
+// STATUS BACKEND
 // ============================================================
 
 function setBackendPill(
@@ -162,26 +160,19 @@ async function checkBackend() {
       await fetch(
         `${BACKEND_URL}/health`,
         {
-          method:
-            "GET",
-
-          cache:
-            "no-store",
+          method: "GET",
+          cache: "no-store",
         }
       );
 
-
     if (!res.ok) {
-
       throw new Error(
         "Backend indisponível"
       );
     }
 
-
     const data =
       await res.json();
-
 
     if (data?.ok) {
 
@@ -203,17 +194,13 @@ async function checkBackend() {
       return;
     }
 
-
     throw new Error(
       "Resposta inválida"
     );
 
-
   } catch (err) {
 
-    console.error(
-      err
-    );
+    console.error(err);
 
     setBackendPill(
       "Backend indisponível",
@@ -232,10 +219,7 @@ saveKeyBtn.addEventListener(
   () => {
 
     const key =
-      appKeyInput
-        .value
-        .trim();
-
+      appKeyInput.value.trim();
 
     if (!key) {
 
@@ -246,16 +230,13 @@ saveKeyBtn.addEventListener(
       return;
     }
 
-
     localStorage.setItem(
       KEY_STORAGE,
       key
     );
 
-
     appKeyInput.value =
       "";
-
 
     showAccessIfNeeded();
 
@@ -276,19 +257,15 @@ changeKeyBtn.addEventListener(
       KEY_STORAGE
     );
 
-
     appKeyInput.value =
       "";
 
-
     showAccessIfNeeded();
-
 
     setBackendPill(
       "Backend online • falta chave",
       "warn"
     );
-
 
     appKeyInput.focus();
   }
@@ -306,7 +283,6 @@ videoInput.addEventListener(
     const file =
       videoInput.files?.[0];
 
-
     if (!file) {
 
       fileName.textContent =
@@ -315,10 +291,8 @@ videoInput.addEventListener(
       return;
     }
 
-
     fileName.textContent =
       `${file.name} • ${formatBytes(file.size)}`;
-
 
     if (
       file.size >
@@ -348,7 +322,7 @@ editBtn.addEventListener(
 
 
     // --------------------------------------------------------
-    // VALIDAR APP KEY
+    // VALIDAR CHAVE
     // --------------------------------------------------------
 
     if (!appKey) {
@@ -409,6 +383,9 @@ editBtn.addEventListener(
     const tempo =
       $("tempo").value;
 
+    const logoPosicao =
+      $("logoPosicao").value;
+
     const etapa =
       $("etapa").value;
 
@@ -417,13 +394,11 @@ editBtn.addEventListener(
     // VALIDAR TEMPO
     // --------------------------------------------------------
 
-    const validTempoModes =
-      [
-        "AUTO",
-        "SHORT_CURTO",
-        "PRESERVAR",
-      ];
-
+    const validTempoModes = [
+      "AUTO",
+      "SHORT_CURTO",
+      "PRESERVAR",
+    ];
 
     if (
       !validTempoModes.includes(
@@ -433,6 +408,31 @@ editBtn.addEventListener(
 
       alert(
         "Selecione uma opção válida de tempo."
+      );
+
+      return;
+    }
+
+
+    // --------------------------------------------------------
+    // VALIDAR POSICAO DA LOGO
+    // --------------------------------------------------------
+
+    const validLogoModes = [
+      "NORMAL",
+      "LATERAL",
+      "VERTICAL",
+      "LATERAL_VERTICAL",
+    ];
+
+    if (
+      !validLogoModes.includes(
+        logoPosicao
+      )
+    ) {
+
+      alert(
+        "Selecione uma posição válida para a logo."
       );
 
       return;
@@ -465,7 +465,7 @@ editBtn.addEventListener(
 
 
     // --------------------------------------------------------
-    // LIMPAR VIDEO ANTERIOR
+    // LIMPAR PREVIEW ANTERIOR
     // --------------------------------------------------------
 
     if (currentObjectUrl) {
@@ -478,7 +478,6 @@ editBtn.addEventListener(
         null;
     }
 
-
     preview.pause();
 
     preview.removeAttribute(
@@ -486,7 +485,6 @@ editBtn.addEventListener(
     );
 
     preview.load();
-
 
     downloadBtn.removeAttribute(
       "href"
@@ -514,8 +512,7 @@ editBtn.addEventListener(
         await fetch(
           `${BACKEND_URL}/jobs`,
           {
-            method:
-              "POST",
+            method: "POST",
 
             headers: {
 
@@ -537,6 +534,9 @@ editBtn.addEventListener(
 
               "X-Tempo":
                 tempo,
+
+              "X-Logo-Posicao":
+                logoPosicao,
 
               "X-Etapa":
                 etapa,
@@ -576,12 +576,11 @@ editBtn.addEventListener(
 
 
       // ------------------------------------------------------
-      // MOSTRAR MODO ESCOLHIDO
+      // LABEL TEMPO
       // ------------------------------------------------------
 
       let tempoLabel =
-        "Automático";
-
+        "Tempo automático";
 
       if (
         tempo ===
@@ -591,7 +590,6 @@ editBtn.addEventListener(
         tempoLabel =
           "Short curto • 10 a 20 s";
       }
-
 
       if (
         tempo ===
@@ -603,10 +601,45 @@ editBtn.addEventListener(
       }
 
 
+      // ------------------------------------------------------
+      // LABEL LOGO
+      // ------------------------------------------------------
+
+      let logoLabel =
+        "Logo normal";
+
+      if (
+        logoPosicao ===
+        "LATERAL"
+      ) {
+
+        logoLabel =
+          "Logo deslocada lateralmente";
+      }
+
+      if (
+        logoPosicao ===
+        "VERTICAL"
+      ) {
+
+        logoLabel =
+          "Logo deslocada verticalmente";
+      }
+
+      if (
+        logoPosicao ===
+        "LATERAL_VERTICAL"
+      ) {
+
+        logoLabel =
+          "Logo deslocada lateral + vertical";
+      }
+
+
       setProgress(
         15,
         "Vídeo recebido",
-        `${tempoLabel} • iniciando o GitHub Actions.`
+        `${tempoLabel} • ${logoLabel} • iniciando o GitHub Actions.`
       );
 
 
@@ -622,10 +655,7 @@ editBtn.addEventListener(
 
     } catch (err) {
 
-      console.error(
-        err
-      );
-
+      console.error(err);
 
       setProgress(
         0,
@@ -635,7 +665,6 @@ editBtn.addEventListener(
           err
         )
       );
-
 
       editBtn.disabled =
         false;
@@ -663,15 +692,9 @@ async function pollJob(
       5000
     );
 
-
     let res;
-
     let data;
 
-
-    // --------------------------------------------------------
-    // APENAS ERROS DE COMUNICACAO
-    // --------------------------------------------------------
 
     try {
 
@@ -679,8 +702,7 @@ async function pollJob(
         await fetch(
           `${BACKEND_URL}/jobs/${encodeURIComponent(jobId)}`,
           {
-            method:
-              "GET",
+            method: "GET",
 
             headers: {
               "X-App-Key":
@@ -723,10 +745,6 @@ async function pollJob(
         err
       );
 
-
-      // ------------------------------------------------------
-      // 12 FALHAS CONSECUTIVAS ~= 1 MINUTO
-      // ------------------------------------------------------
 
       if (
         consecutiveErrors <=
@@ -792,7 +810,7 @@ async function pollJob(
 
 
     // --------------------------------------------------------
-    // ERRO REAL DO ACTIONS
+    // ERRO REAL
     // --------------------------------------------------------
 
     if (
@@ -805,10 +823,6 @@ async function pollJob(
       );
     }
 
-
-    // --------------------------------------------------------
-    // CONTINUA PROCESSANDO
-    // --------------------------------------------------------
 
     updateProcessingProgress();
   }
@@ -904,8 +918,7 @@ async function loadFinalVideo(
     await fetch(
       `${BACKEND_URL}/jobs/${encodeURIComponent(jobId)}/download`,
       {
-        method:
-          "GET",
+        method: "GET",
 
         headers: {
           "X-App-Key":
@@ -922,7 +935,6 @@ async function loadFinalVideo(
 
     let maybe =
       "";
-
 
     try {
 
@@ -1008,9 +1020,9 @@ function updateProcessingProgress() {
       Math.max(
         fakeProgress + 2,
         18 +
-          Math.floor(
-            elapsedSec / 8
-          )
+        Math.floor(
+          elapsedSec / 8
+        )
       )
     );
 
@@ -1094,14 +1106,11 @@ function setProgress(
   progressBar.style.width =
     `${safe}%`;
 
-
   progressPercent.textContent =
     `${safe}%`;
 
-
   progressTitle.textContent =
     title;
-
 
   progressDetail.textContent =
     detail;
@@ -1109,7 +1118,7 @@ function setProgress(
 
 
 // ============================================================
-// FORMATAR TAMANHO DO ARQUIVO
+// FORMATAR BYTES
 // ============================================================
 
 function formatBytes(
@@ -1117,33 +1126,26 @@ function formatBytes(
 ) {
 
   if (!bytes) {
-
     return "0 B";
   }
 
 
-  const units =
-    [
-      "B",
-      "KB",
-      "MB",
-      "GB",
-    ];
+  const units = [
+    "B",
+    "KB",
+    "MB",
+    "GB",
+  ];
 
 
   const i =
     Math.min(
       Math.floor(
-        Math.log(
-          bytes
-        ) /
-        Math.log(
-          1024
-        )
+        Math.log(bytes) /
+        Math.log(1024)
       ),
 
-      units.length -
-        1
+      units.length - 1
     );
 
 
@@ -1154,15 +1156,13 @@ function formatBytes(
       i
     )
   ).toFixed(
-    i
-      ? 1
-      : 0
+    i ? 1 : 0
   )} ${units[i]}`;
 }
 
 
 // ============================================================
-// TEXTO SEGURO PARA HEADER HTTP
+// TEXTO SEGURO PARA HEADER
 // ============================================================
 
 function headerSafe(
@@ -1213,7 +1213,6 @@ async function safeJson(
 
 
   if (!text) {
-
     return {};
   }
 
@@ -1223,7 +1222,6 @@ async function safeJson(
     return JSON.parse(
       text
     );
-
 
   } catch {
 
