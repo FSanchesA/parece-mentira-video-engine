@@ -205,53 +205,85 @@ editBtn.addEventListener("click", async () => {
 });
 
 async function pollJob(jobId, appKey) {
+  let consecutiveErrors = 0;
+
   while (true) {
     await sleep(5000);
 
-    const res = await fetch(`${BACKEND_URL}/jobs/${encodeURIComponent(jobId)}`, {
-      method: "GET",
-      headers: {
-        "X-App-Key": appKey,
-      },
-      cache: "no-store",
-    });
+    try {
+      const res = await fetch(
+        `${BACKEND_URL}/jobs/${encodeURIComponent(jobId)}`,
+        {
+          method: "GET",
+          headers: {
+            "X-App-Key": appKey,
+          },
+          cache: "no-store",
+        }
+      );
 
-    const data = await safeJson(res);
+      const data = await safeJson(res);
 
-    if (!res.ok) {
+      if (!res.ok) {
+        throw new Error(
+          data?.error ||
+          `Falha ao consultar job (${res.status}).`
+        );
+      }
+
+      consecutiveErrors = 0;
+
+      if (data.status === "PRONTO") {
+        setProgress(
+          96,
+          "Finalizando...",
+          "Master aprovado. Preparando o download."
+        );
+
+        await loadFinalVideo(jobId, appKey);
+
+        setProgress(
+          100,
+          "Concluído",
+          "Master final validado."
+        );
+
+        resultCard.classList.remove("hidden");
+        editBtn.disabled = false;
+
+        break;
+      }
+
+      if (data.status === "ERRO") {
+        throw new Error(
+          "O GitHub Actions informou falha real no processamento."
+        );
+      }
+
+      updateProcessingProgress();
+
+    } catch (err) {
+      consecutiveErrors += 1;
+
+      console.warn(
+        "Falha temporária ao consultar job:",
+        err
+      );
+
+      if (consecutiveErrors <= 12) {
+        setProgress(
+          fakeProgress,
+          "Processando...",
+          "Conexão oscilou. Continuando a acompanhar o GitHub."
+        );
+
+        continue;
+      }
+
       throw new Error(
-        data?.error ||
-        `Falha ao consultar job (${res.status}).`
+        "O processamento pode ainda estar rodando, mas o app perdeu a comunicação por muito tempo. Verifique o GitHub Actions."
       );
     }
-
-    if (data.status === "PRONTO") {
-      setProgress(
-        96,
-        "Finalizando...",
-        "Master aprovado. Preparando o download."
-      );
-
-      await loadFinalVideo(jobId, appKey);
-
-      setProgress(
-        100,
-        "Concluído",
-        "Master final validado."
-      );
-
-      resultCard.classList.remove("hidden");
-      editBtn.disabled = false;
-      break;
-    }
-
-    if (data.status === "ERRO") {
-      throw new Error(
-        "O GitHub Actions informou falha no processamento."
-      );
-    }
-
-    updateProcessingProgress();
   }
 }
 
