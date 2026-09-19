@@ -325,8 +325,8 @@ jobs:
 
           if [ "$LOGO_POSITION" = "LATERAL" ]; then
 
-            TOP_X="W-w-68"
-            BOTTOM_X="68"
+            TOP_X="W-w-48"
+            BOTTOM_X="48"
 
           fi
 
@@ -352,8 +352,8 @@ jobs:
 
           if [ "$LOGO_POSITION" = "LATERAL_VERTICAL" ]; then
 
-            TOP_X="W-w-68"
-            BOTTOM_X="68"
+            TOP_X="W-w-48"
+            BOTTOM_X="48"
 
             TOP_Y="390"
             BOTTOM_Y="H-h-595"
