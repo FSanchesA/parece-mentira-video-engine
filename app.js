@@ -1,6 +1,16 @@
 // ------------------------------------------------------------
-// PARECE MENTIRA - FRONTEND PWA V3
+// PARECE MENTIRA - FRONTEND PWA V4
 // Cloudflare Worker -> GitHub Actions -> Final Master
+//
+// V4:
+// - Narracao
+// - Tempo:
+//     AUTO
+//     SHORT_CURTO
+//     PRESERVAR
+// - Processamento
+// - Polling resiliente
+// - Download final com retentativas
 // ------------------------------------------------------------
 
 const BACKEND_URL =
@@ -16,9 +26,9 @@ const $ = (id) =>
   document.getElementById(id);
 
 
-// ------------------------------------------------------------
-// ELEMENTOS DA INTERFACE
-// ------------------------------------------------------------
+// ============================================================
+// ELEMENTOS
+// ============================================================
 
 const videoInput =
   $("videoInput");
@@ -69,22 +79,26 @@ const changeKeyBtn =
   $("changeKeyBtn");
 
 
-// ------------------------------------------------------------
+// ============================================================
 // ESTADO
-// ------------------------------------------------------------
+// ============================================================
 
-let currentJobId = null;
+let currentJobId =
+  null;
 
-let currentObjectUrl = null;
+let currentObjectUrl =
+  null;
 
-let fakeProgress = 15;
+let fakeProgress =
+  15;
 
-let pollStartedAt = 0;
+let pollStartedAt =
+  0;
 
 
-// ------------------------------------------------------------
+// ============================================================
 // APP KEY
-// ------------------------------------------------------------
+// ============================================================
 
 function getAppKey() {
   return (
@@ -95,14 +109,15 @@ function getAppKey() {
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // STATUS DO BACKEND
-// ------------------------------------------------------------
+// ============================================================
 
 function setBackendPill(
   text,
   type
 ) {
+
   apiStatus.textContent =
     text;
 
@@ -121,6 +136,7 @@ function setBackendPill(
 
 
 function showAccessIfNeeded() {
+
   const hasKey =
     Boolean(
       getAppKey()
@@ -139,7 +155,9 @@ function showAccessIfNeeded() {
 
 
 async function checkBackend() {
+
   try {
+
     const res =
       await fetch(
         `${BACKEND_URL}/health`,
@@ -152,20 +170,23 @@ async function checkBackend() {
         }
       );
 
+
     if (!res.ok) {
+
       throw new Error(
         "Backend indisponível"
       );
     }
 
+
     const data =
       await res.json();
 
+
     if (data?.ok) {
 
-      if (
-        getAppKey()
-      ) {
+      if (getAppKey()) {
+
         setBackendPill(
           "Backend conectado",
           "ok"
@@ -182,9 +203,11 @@ async function checkBackend() {
       return;
     }
 
+
     throw new Error(
       "Resposta inválida"
     );
+
 
   } catch (err) {
 
@@ -200,9 +223,9 @@ async function checkBackend() {
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // SALVAR APP KEY
-// ------------------------------------------------------------
+// ============================================================
 
 saveKeyBtn.addEventListener(
   "click",
@@ -213,7 +236,9 @@ saveKeyBtn.addEventListener(
         .value
         .trim();
 
+
     if (!key) {
+
       alert(
         "Digite a APP_KEY."
       );
@@ -221,13 +246,16 @@ saveKeyBtn.addEventListener(
       return;
     }
 
+
     localStorage.setItem(
       KEY_STORAGE,
       key
     );
 
+
     appKeyInput.value =
       "";
+
 
     showAccessIfNeeded();
 
@@ -236,9 +264,9 @@ saveKeyBtn.addEventListener(
 );
 
 
-// ------------------------------------------------------------
+// ============================================================
 // TROCAR APP KEY
-// ------------------------------------------------------------
+// ============================================================
 
 changeKeyBtn.addEventListener(
   "click",
@@ -248,24 +276,28 @@ changeKeyBtn.addEventListener(
       KEY_STORAGE
     );
 
+
     appKeyInput.value =
       "";
 
+
     showAccessIfNeeded();
+
 
     setBackendPill(
       "Backend online • falta chave",
       "warn"
     );
 
+
     appKeyInput.focus();
   }
 );
 
 
-// ------------------------------------------------------------
-// SELEÇÃO DO VIDEO
-// ------------------------------------------------------------
+// ============================================================
+// SELECIONAR VIDEO
+// ============================================================
 
 videoInput.addEventListener(
   "change",
@@ -273,6 +305,7 @@ videoInput.addEventListener(
 
     const file =
       videoInput.files?.[0];
+
 
     if (!file) {
 
@@ -282,8 +315,10 @@ videoInput.addEventListener(
       return;
     }
 
+
     fileName.textContent =
       `${file.name} • ${formatBytes(file.size)}`;
+
 
     if (
       file.size >
@@ -297,9 +332,9 @@ videoInput.addEventListener(
 );
 
 
-// ------------------------------------------------------------
-// BOTÃO EDITAR
-// ------------------------------------------------------------
+// ============================================================
+// EDITAR VIDEO
+// ============================================================
 
 editBtn.addEventListener(
   "click",
@@ -312,9 +347,9 @@ editBtn.addEventListener(
       getAppKey();
 
 
-    // -------------------------
-    // VALIDAR CHAVE
-    // -------------------------
+    // --------------------------------------------------------
+    // VALIDAR APP KEY
+    // --------------------------------------------------------
 
     if (!appKey) {
 
@@ -330,9 +365,9 @@ editBtn.addEventListener(
     }
 
 
-    // -------------------------
+    // --------------------------------------------------------
     // VALIDAR VIDEO
-    // -------------------------
+    // --------------------------------------------------------
 
     if (!file) {
 
@@ -357,9 +392,56 @@ editBtn.addEventListener(
     }
 
 
-    // -------------------------
-    // RESET DE INTERFACE
-    // -------------------------
+    // --------------------------------------------------------
+    // LER OPCOES
+    // --------------------------------------------------------
+
+    const contexto =
+      headerSafe(
+        $("contexto")
+          .value
+          .trim()
+      );
+
+    const modo =
+      $("modo").value;
+
+    const tempo =
+      $("tempo").value;
+
+    const etapa =
+      $("etapa").value;
+
+
+    // --------------------------------------------------------
+    // VALIDAR TEMPO
+    // --------------------------------------------------------
+
+    const validTempoModes =
+      [
+        "AUTO",
+        "SHORT_CURTO",
+        "PRESERVAR",
+      ];
+
+
+    if (
+      !validTempoModes.includes(
+        tempo
+      )
+    ) {
+
+      alert(
+        "Selecione uma opção válida de tempo."
+      );
+
+      return;
+    }
+
+
+    // --------------------------------------------------------
+    // RESET
+    // --------------------------------------------------------
 
     resultCard.classList.add(
       "hidden"
@@ -382,13 +464,11 @@ editBtn.addEventListener(
       Date.now();
 
 
-    // -------------------------
-    // LIMPAR PREVIEW ANTERIOR
-    // -------------------------
+    // --------------------------------------------------------
+    // LIMPAR VIDEO ANTERIOR
+    // --------------------------------------------------------
 
-    if (
-      currentObjectUrl
-    ) {
+    if (currentObjectUrl) {
 
       URL.revokeObjectURL(
         currentObjectUrl
@@ -398,6 +478,7 @@ editBtn.addEventListener(
         null;
     }
 
+
     preview.pause();
 
     preview.removeAttribute(
@@ -406,14 +487,15 @@ editBtn.addEventListener(
 
     preview.load();
 
+
     downloadBtn.removeAttribute(
       "href"
     );
 
 
-    // -------------------------
+    // --------------------------------------------------------
     // STATUS
-    // -------------------------
+    // --------------------------------------------------------
 
     setProgress(
       8,
@@ -424,23 +506,9 @@ editBtn.addEventListener(
 
     try {
 
-      const contexto =
-        headerSafe(
-          $("contexto")
-            .value
-            .trim()
-        );
-
-      const modo =
-        $("modo").value;
-
-      const etapa =
-        $("etapa").value;
-
-
-      // ------------------------------------------------------
-      // ENVIAR VIDEO AO WORKER
-      // ------------------------------------------------------
+      // ======================================================
+      // CRIAR JOB
+      // ======================================================
 
       const startRes =
         await fetch(
@@ -450,6 +518,7 @@ editBtn.addEventListener(
               "POST",
 
             headers: {
+
               "Content-Type":
                 file.type ||
                 "application/octet-stream",
@@ -465,6 +534,9 @@ editBtn.addEventListener(
 
               "X-Modo":
                 modo,
+
+              "X-Tempo":
+                tempo,
 
               "X-Etapa":
                 etapa,
@@ -482,9 +554,7 @@ editBtn.addEventListener(
         );
 
 
-      if (
-        !startRes.ok
-      ) {
+      if (!startRes.ok) {
 
         throw new Error(
           startData?.error ||
@@ -493,9 +563,7 @@ editBtn.addEventListener(
       }
 
 
-      if (
-        !startData?.job_id
-      ) {
+      if (!startData?.job_id) {
 
         throw new Error(
           "O backend recebeu o vídeo, mas não retornou o identificador do processamento."
@@ -507,16 +575,44 @@ editBtn.addEventListener(
         startData.job_id;
 
 
+      // ------------------------------------------------------
+      // MOSTRAR MODO ESCOLHIDO
+      // ------------------------------------------------------
+
+      let tempoLabel =
+        "Automático";
+
+
+      if (
+        tempo ===
+        "SHORT_CURTO"
+      ) {
+
+        tempoLabel =
+          "Short curto • 10 a 20 s";
+      }
+
+
+      if (
+        tempo ===
+        "PRESERVAR"
+      ) {
+
+        tempoLabel =
+          "Preservar tempo • 90 a 100%";
+      }
+
+
       setProgress(
         15,
         "Vídeo recebido",
-        `Job ${currentJobId} • iniciando o GitHub Actions.`
+        `${tempoLabel} • iniciando o GitHub Actions.`
       );
 
 
-      // ------------------------------------------------------
-      // ACOMPANHAR PROCESSAMENTO
-      // ------------------------------------------------------
+      // ======================================================
+      // ACOMPANHAR JOB
+      // ======================================================
 
       await pollJob(
         currentJobId,
@@ -530,6 +626,7 @@ editBtn.addEventListener(
         err
       );
 
+
       setProgress(
         0,
         "Falha no processamento",
@@ -539,6 +636,7 @@ editBtn.addEventListener(
         )
       );
 
+
       editBtn.disabled =
         false;
     }
@@ -546,9 +644,9 @@ editBtn.addEventListener(
 );
 
 
-// ------------------------------------------------------------
-// MONITORAR GITHUB ACTIONS
-// ------------------------------------------------------------
+// ============================================================
+// MONITORAR JOB
+// ============================================================
 
 async function pollJob(
   jobId,
@@ -572,7 +670,7 @@ async function pollJob(
 
 
     // --------------------------------------------------------
-    // SOMENTE ERROS DE COMUNICAÇÃO ENTRAM NESTE TRY/CATCH
+    // APENAS ERROS DE COMUNICACAO
     // --------------------------------------------------------
 
     try {
@@ -627,8 +725,7 @@ async function pollJob(
 
 
       // ------------------------------------------------------
-      // ATÉ 12 OSCILAÇÕES CONSECUTIVAS
-      // ≈ 1 MINUTO
+      // 12 FALHAS CONSECUTIVAS ~= 1 MINUTO
       // ------------------------------------------------------
 
       if (
@@ -653,7 +750,7 @@ async function pollJob(
 
 
     // --------------------------------------------------------
-    // GITHUB TERMINOU COM SUCESSO
+    // PRONTO
     // --------------------------------------------------------
 
     if (
@@ -667,10 +764,6 @@ async function pollJob(
         "Master aprovado. Preparando o vídeo."
       );
 
-
-      // ------------------------------------------------------
-      // BAIXAR COM RETENTATIVA
-      // ------------------------------------------------------
 
       await loadFinalVideoWithRetry(
         jobId,
@@ -699,7 +792,7 @@ async function pollJob(
 
 
     // --------------------------------------------------------
-    // GITHUB REALMENTE FALHOU
+    // ERRO REAL DO ACTIONS
     // --------------------------------------------------------
 
     if (
@@ -714,7 +807,7 @@ async function pollJob(
 
 
     // --------------------------------------------------------
-    // AINDA PROCESSANDO
+    // CONTINUA PROCESSANDO
     // --------------------------------------------------------
 
     updateProcessingProgress();
@@ -722,9 +815,9 @@ async function pollJob(
 }
 
 
-// ------------------------------------------------------------
-// DOWNLOAD FINAL COM RETENTATIVA
-// ------------------------------------------------------------
+// ============================================================
+// DOWNLOAD COM RETENTATIVA
+// ============================================================
 
 async function loadFinalVideoWithRetry(
   jobId,
@@ -744,7 +837,10 @@ async function loadFinalVideoWithRetry(
     try {
 
       setProgress(
-        96 + attempt - 1,
+        Math.min(
+          99,
+          95 + attempt
+        ),
         "Preparando vídeo...",
         `Baixando master final • tentativa ${attempt}/4`
       );
@@ -784,7 +880,8 @@ async function loadFinalVideoWithRetry(
 
 
   throw new Error(
-    "O vídeo foi concluído no GitHub, mas o app não conseguiu carregar o arquivo final. Tente abrir novamente em alguns instantes. Detalhe: " +
+    "O vídeo foi concluído no GitHub, mas o app não conseguiu carregar o arquivo final. " +
+    "Tente abrir novamente em alguns instantes. Detalhe: " +
     String(
       lastError?.message ||
       lastError ||
@@ -794,9 +891,9 @@ async function loadFinalVideoWithRetry(
 }
 
 
-// ------------------------------------------------------------
-// DOWNLOAD DO FINAL MASTER
-// ------------------------------------------------------------
+// ============================================================
+// CARREGAR MASTER FINAL
+// ============================================================
 
 async function loadFinalVideo(
   jobId,
@@ -821,12 +918,11 @@ async function loadFinalVideo(
     );
 
 
-  if (
-    !res.ok
-  ) {
+  if (!res.ok) {
 
     let maybe =
       "";
+
 
     try {
 
@@ -861,9 +957,7 @@ async function loadFinalVideo(
   }
 
 
-  if (
-    currentObjectUrl
-  ) {
+  if (currentObjectUrl) {
 
     URL.revokeObjectURL(
       currentObjectUrl
@@ -893,9 +987,9 @@ async function loadFinalVideo(
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // PROGRESSO VISUAL
-// ------------------------------------------------------------
+// ============================================================
 
 function updateProcessingProgress() {
 
@@ -975,9 +1069,9 @@ function updateProcessingProgress() {
 }
 
 
-// ------------------------------------------------------------
-// ATUALIZAR BARRA DE PROGRESSO
-// ------------------------------------------------------------
+// ============================================================
+// BARRA DE PROGRESSO
+// ============================================================
 
 function setProgress(
   value,
@@ -1000,26 +1094,30 @@ function setProgress(
   progressBar.style.width =
     `${safe}%`;
 
+
   progressPercent.textContent =
     `${safe}%`;
 
+
   progressTitle.textContent =
     title;
+
 
   progressDetail.textContent =
     detail;
 }
 
 
-// ------------------------------------------------------------
-// FORMATAR TAMANHO
-// ------------------------------------------------------------
+// ============================================================
+// FORMATAR TAMANHO DO ARQUIVO
+// ============================================================
 
 function formatBytes(
   bytes
 ) {
 
   if (!bytes) {
+
     return "0 B";
   }
 
@@ -1063,9 +1161,9 @@ function formatBytes(
 }
 
 
-// ------------------------------------------------------------
-// CONTEXTO SEGURO PARA HEADER
-// ------------------------------------------------------------
+// ============================================================
+// TEXTO SEGURO PARA HEADER HTTP
+// ============================================================
 
 function headerSafe(
   value
@@ -1102,9 +1200,9 @@ function headerSafe(
 }
 
 
-// ------------------------------------------------------------
-// RESPOSTA JSON SEGURA
-// ------------------------------------------------------------
+// ============================================================
+// JSON SEGURO
+// ============================================================
 
 async function safeJson(
   response
@@ -1115,6 +1213,7 @@ async function safeJson(
 
 
   if (!text) {
+
     return {};
   }
 
@@ -1124,6 +1223,7 @@ async function safeJson(
     return JSON.parse(
       text
     );
+
 
   } catch {
 
@@ -1135,9 +1235,9 @@ async function safeJson(
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // ESPERA
-// ------------------------------------------------------------
+// ============================================================
 
 function sleep(ms) {
 
@@ -1151,18 +1251,18 @@ function sleep(ms) {
 }
 
 
-// ------------------------------------------------------------
-// INICIALIZAÇÃO
-// ------------------------------------------------------------
+// ============================================================
+// INICIALIZACAO
+// ============================================================
 
 showAccessIfNeeded();
 
 checkBackend();
 
 
-// ------------------------------------------------------------
-// SERVICE WORKER V3
-// ------------------------------------------------------------
+// ============================================================
+// SERVICE WORKER
+// ============================================================
 
 if (
   "serviceWorker"
