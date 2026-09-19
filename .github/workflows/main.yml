@@ -3821,6 +3821,7 @@ jobs:
 
 
       - name: Stage 08 - Montar Texto Continuo
+              - name: Stage 08 - Montar Texto Continuo
         shell: bash
 
         env:
@@ -3848,18 +3849,20 @@ jobs:
 
 
           user_mode = os.getenv(
-               "USER_MODE",
-               "AUTO"
+              "USER_MODE",
+              "AUTO"
           ).strip().upper()
+
 
           timeline = plan.get(
               "timeline",
               []
           )
 
+
           if user_mode == "SEM_NARRACAO":
 
-          text = ""
+              text = ""
 
 
           else:
