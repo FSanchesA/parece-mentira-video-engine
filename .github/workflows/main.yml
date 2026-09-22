@@ -1,4 +1,4 @@
-name: Parece Mentira - Video Engine V15.25 Logo Control
+name: Parece Mentira - Video Engine V15.26 Narrative Coherence
 
 run-name: ${{ inputs.app_job_tag != '' && format('APP {0}', inputs.app_job_tag) || 'Execucao manual' }}
 
@@ -1687,8 +1687,9 @@ jobs:
              mantenha apenas o essencial.
 
           5. No modo PRESERVAR:
-             remova apenas material realmente dispensavel.
-             A duracao final precisa ficar em 90-100%.
+             preserve 90-100% da DURACAO, nao da ordem original.
+             Pode reorganizar cenas quando isso melhorar a historia.
+             Nao reverta automaticamente para a cronologia da fonte.
 
           6. Nao use freeze frame.
 
@@ -1715,7 +1716,9 @@ jobs:
               - nao substituir
               - nao contradizer
 
-          13. Legenda visivel tem prioridade sobre reordenacao.
+          13. Legenda visivel restringe COERENCIA, nao cronologia.
+              A cena pode ser reposicionada se continuar semanticamente compreensivel.
+              Nunca contradiga o texto visivel.
 
           14. Termine naturalmente, quando houver narracao:
               "Parece mentira. Mas aconteceu."
@@ -1737,6 +1740,25 @@ jobs:
               {total_duration*0.90:.2f}
               a
               {total_duration:.2f}s.
+
+          21. NAO reordene por obrigacao. Reordene somente quando houver ganho narrativo real.
+
+          22. A ordem cronologica original NAO e uma restricao editorial.
+              Um momento forte pode abrir o video e o contexto pode vir depois,
+              desde que a historia continue clara e verdadeira.
+
+          23. Identifique blocos semanticos, causais e temporais.
+              Cenas que dependem umas das outras devem permanecer coerentes como bloco.
+
+          24. Primeiro reconstrua a HISTORIA VISUAL.
+              Nesta primeira resposta, deixe TODOS os campos narration vazios.
+              A narracao sera escrita somente depois que a timeline final estiver validada.
+
+          25. Nao repita a fonte mecanicamente. Editar pode significar cortar,
+              aproximar cenas relacionadas, antecipar um gancho ou reorganizar blocos.
+
+          26. Nao invente fatos, personagens, locais, causas ou desfechos que
+              nao estejam sustentados pelo video, transcricao ou contexto fornecido.
 
 
           RETORNE SOMENTE JSON VALIDO:
@@ -2496,85 +2518,87 @@ jobs:
                   )
 
 
-                  narration_parts = []
-
-
+                  # Primeiro expande as cenas JA escolhidas pelo diretor,
+                  # mantendo exatamente a ordem editorial decidida.
                   for item in timeline:
 
-                      text = str(
-                          item.get(
-                              "narration",
-                              ""
-                          )
-                      ).strip()
+                      if item.get("kind") != "scene":
+                          continue
 
-
-                      if text:
-
-                          narration_parts.append(
-                              text
-                          )
-
-
-                  preserved_timeline = []
-
-
-                  for scene_data in manifest:
-
-                      duration = (
-                          float(
-                              scene_data[
-                                  "duration"
-                              ]
-                          ) *
-                          0.95
+                      scene_num = int(item["scene"])
+                      item["duration"] = round(
+                          original_durations[scene_num],
+                          3
                       )
 
 
-                      preserved_timeline.append({
-                          "kind":
-                              "scene",
+                  timeline_duration = timeline_total(
+                      timeline
+                  )
 
-                          "scene":
-                              int(
-                                  scene_data[
-                                      "scene"
-                                  ]
-                              ),
 
-                          "duration":
-                              round(
-                                  duration,
+                  # Se ainda faltar duracao, recupera cenas nao usadas perto do
+                  # bloco semanticamente mais proximo, SEM reconstruir 1,2,3,4...
+                  if timeline_duration < preserve_min:
+
+                      used_scenes = [
+                          int(i["scene"])
+                          for i in timeline
+                          if i.get("kind") == "scene"
+                      ]
+
+                      unused = [
+                          int(s["scene"])
+                          for s in manifest
+                          if int(s["scene"]) not in set(used_scenes)
+                      ]
+
+                      for scene_num in unused:
+
+                          if timeline_total(timeline) >= preserve_min:
+                              break
+
+                          new_item = {
+                              "kind": "scene",
+                              "scene": scene_num,
+                              "duration": round(
+                                  original_durations[scene_num] * 0.95,
                                   3
                               ),
+                              "narration": "",
+                              "reason": (
+                                  "Cena recuperada para cumprir PRESERVAR sem "
+                                  "desfazer a estrutura editorial escolhida."
+                              )
+                          }
 
-                          "narration":
-                              "",
+                          # Insere proximo da cena escolhida com numero de origem
+                          # mais proximo. Isso preserva relacoes locais sem
+                          # resetar a timeline inteira para a ordem da fonte.
+                          scene_positions = [
+                              (idx, int(it["scene"]))
+                              for idx, it in enumerate(timeline)
+                              if it.get("kind") == "scene"
+                          ]
 
-                          "reason":
-                              "Cena mantida para preservar aproximadamente a duracao original."
-                      })
+                          if not scene_positions:
+                              timeline.append(new_item)
+                          else:
+                              nearest_idx, nearest_scene = min(
+                                  scene_positions,
+                                  key=lambda pair: abs(pair[1] - scene_num)
+                              )
 
+                              insert_at = (
+                                  nearest_idx
+                                  if scene_num < nearest_scene
+                                  else nearest_idx + 1
+                              )
 
-                  if (
-                      narration_parts
-                      and
-                      preserved_timeline
-                      and
-                      user_mode !=
-                      "SEM_NARRACAO"
-                  ):
-
-                      preserved_timeline[
-                          0
-                      ][
-                          "narration"
-                      ] = " ".join(
-                          narration_parts
-                      )
-
-
-                  timeline = preserved_timeline
+                              timeline.insert(
+                                  insert_at,
+                                  new_item
+                              )
 
 
               final_preserve = timeline_total(
@@ -2621,6 +2645,163 @@ jobs:
               ),
               3
           )
+
+
+          # =====================================================
+          # SEGUNDA PASSAGEM - NARRADOR SOBRE A TIMELINE FINAL
+          # =====================================================
+
+          if user_mode == "SEM_NARRACAO":
+
+              for item in timeline:
+                  item["narration"] = ""
+
+          else:
+
+              final_visual_duration = timeline_total(timeline)
+              global_word_cap = max(
+                  8,
+                  int(max(final_visual_duration - 1.5, 3.0) * 1.90)
+              )
+
+              timeline_for_narrator = []
+
+              for idx, item in enumerate(timeline):
+
+                  row = {
+                      "index": idx,
+                      "kind": item.get("kind"),
+                      "scene": item.get("scene"),
+                      "duration": round(float(item.get("duration", 0)), 3),
+                      "reason": item.get("reason", "")
+                  }
+
+                  if item.get("kind") == "scene":
+                      scene_num = int(item["scene"])
+                      scene_data = next(
+                          x for x in manifest
+                          if int(x["scene"]) == scene_num
+                      )
+                      row["source_transcript"] = scene_data.get("transcript", "")
+
+                  timeline_for_narrator.append(row)
+
+              narration_instructions = f"""
+              Voce e o NARRADOR EDITORIAL do canal PARECE MENTIRA.
+
+              A montagem visual JA ESTA FECHADA.
+              Nao altere ordem, cenas ou duracoes.
+
+              Escreva a narracao SOMENTE depois de compreender esta nova ordem visual.
+
+              Modo solicitado: {user_mode}
+              Contexto: {user_context or '[nao informado]'}
+              Resumo da historia: {plan.get('story_summary', '')}
+              Idioma da fonte: {source_language}
+              Duracao visual final: {final_visual_duration:.2f}s
+              Limite global aproximado: {global_word_cap} palavras.
+
+              TIMELINE FINAL:
+              {json.dumps(timeline_for_narrator, ensure_ascii=False, indent=2)}
+
+              REGRAS OBRIGATORIAS:
+              1. Escreva em portugues do Brasil.
+              2. A narracao deve acompanhar EXATAMENTE a ordem visual final.
+              3. Nao descreva como presente algo que so aparecera depois, salvo teaser intencional e claro.
+              4. Texto visivel/legenda queimada nao precisa ser repetido, mas jamais pode ser contradito.
+              5. Se uma cena foi reposicionada, adapte a narracao a nova funcao narrativa dela.
+              6. Preserve relacoes de causa, consequencia, antes/depois e identidade dos personagens.
+              7. Nao invente fatos. Se a fonte nao sustenta um detalhe, omita.
+              8. Video sem fala pode receber narracao baseada apenas no que e visualmente sustentado e no contexto fornecido.
+              9. Cada trecho deve caber confortavelmente na duracao do item correspondente.
+              10. Use em media no maximo 1.9 palavra por segundo no conjunto.
+              11. No modo ORIGINAL, preserve o sentido factual da fala original, adaptando-o a nova montagem.
+              12. No modo NOVA, reescreva com linguagem propria sem perder os fatos.
+              13. No modo AUTO, escolha a formulacao mais clara e envolvente sem sensacionalismo.
+              14. Quando houver narracao, encerre naturalmente com: "Parece mentira. Mas aconteceu."
+              15. Retorne uma entrada para CADA indice da timeline, mesmo que narration seja vazio.
+
+              RETORNE SOMENTE JSON VALIDO:
+              {{
+                "narrations": [
+                  {{"index": 0, "narration": ""}}
+                ]
+              }}
+              """
+
+              narrator_contents = [narration_instructions]
+
+              # Reenvia as imagens na ordem FINAL para o narrador validar
+              # coerencia entre imagem, texto visivel e fala.
+              for item in timeline:
+
+                  if item.get("kind") != "scene":
+                      continue
+
+                  scene_num = int(item["scene"])
+                  sheet = Path(
+                      f"output/stage06_vision/sheets/scene_{scene_num:03d}.jpg"
+                  )
+
+                  narrator_contents.append(
+                      f"IMAGEM DA CENA {scene_num:03d} NA ORDEM FINAL"
+                  )
+
+                  narrator_contents.append(
+                      types.Part.from_bytes(
+                          data=sheet.read_bytes(),
+                          mime_type="image/jpeg"
+                      )
+                  )
+
+              narration_response = client.models.generate_content(
+                  model=selected_model,
+                  contents=narrator_contents,
+                  config=types.GenerateContentConfig(
+                      response_mime_type="application/json",
+                      temperature=0.25
+                  )
+              )
+
+              narration_raw = (
+                  narration_response.text or ""
+              ).strip()
+
+              narration_raw = re.sub(
+                  r"^```(?:json)?\s*",
+                  "",
+                  narration_raw,
+                  flags=re.I
+              )
+
+              narration_raw = re.sub(
+                  r"\s*```$",
+                  "",
+                  narration_raw
+              )
+
+              narration_data = json.loads(narration_raw)
+              narration_rows = narration_data.get("narrations", [])
+
+              narration_map = {
+                  int(row["index"]): str(row.get("narration", "")).strip()
+                  for row in narration_rows
+                  if "index" in row
+              }
+
+              for idx, item in enumerate(timeline):
+                  item["narration"] = narration_map.get(idx, "")
+
+              Path(
+                  "output/stage06_ai/narrator_raw.txt"
+              ).write_text(
+                  narration_raw,
+                  encoding="utf-8"
+              )
+
+          plan["timeline"] = timeline
+          plan["narrative_architecture"] = "visual_first_then_narration"
+          plan["visual_fallback_allowed"] = False
 
 
           Path(
@@ -4060,8 +4241,8 @@ jobs:
             -v r="$RATIO" '
             BEGIN {
               if (r <= 1.00) t=1.00;
-              else if (r <= 1.15) t=r;
-              else t=1.15;
+              else if (r <= 1.20) t=r;
+              else t=1.20;
               printf "%.6f", t
             }')
 
@@ -4094,75 +4275,15 @@ jobs:
 
           if [ "$TOO_LONG" = "1" ]; then
 
+            echo "ERRO: narracao excedeu a timeline visual mesmo apos ajuste."
+            echo "A montagem visual NAO sera descartada nem substituida pela ordem original."
 
-            if [ "$USER_TEMPO" = "SHORT_CURTO" ]; then
-
-              echo "ERRO: narracao maior que SHORT_CURTO."
-
-              exit 1
-
-
-            else
-
-
-              SOURCE_DURATION=$(ffprobe \
-                -v error \
-                -show_entries format=duration \
-                -of default=noprint_wrappers=1:nokey=1 \
-                output/editorial_master.mp4)
-
-
-              CAN_FIT=$(awk \
-                -v a="$FITTED_AUDIO" \
-                -v s="$SOURCE_DURATION" \
-                'BEGIN {
-                  if (a <= s + 0.35)
-                    print 1;
-                  else
-                    print 0
-                }')
-
-
-              if [ "$CAN_FIT" = "1" ]; then
-
-
-                cp \
-                  output/editorial_master.mp4 \
-                  output/stage07/ai_visual_master_fallback.mp4
-
-
-                if [ "$USER_TEMPO" = "PRESERVAR" ]; then
-
-                  VIDEO_DURATION="$SOURCE_DURATION"
-
-                else
-
-                  VIDEO_DURATION="$FITTED_AUDIO"
-
-                fi
-
-
-              else
-
-                echo "ERRO: fonte nao comporta narracao."
-
-                exit 1
-
-              fi
-
-            fi
+            exit 1
 
           fi
 
 
           VISUAL_INPUT="output/stage07/ai_visual_master.mp4"
-
-
-          if [ -s output/stage07/ai_visual_master_fallback.mp4 ]; then
-
-            VISUAL_INPUT="output/stage07/ai_visual_master_fallback.mp4"
-
-          fi
 
 
           ffmpeg -y \
@@ -4838,7 +4959,15 @@ jobs:
                   True,
 
               "narration_preserved":
-                  True
+                  os.getenv("USER_MODE", "AUTO").upper() == "ORIGINAL",
+              "narration_mode":
+                  os.getenv("USER_MODE", "AUTO").upper(),
+              "narration_present":
+                  not Path("output/stage08/no_narration.flag").exists(),
+              "visual_fallback_used":
+                  False,
+              "narrative_architecture":
+                  "visual_first_then_narration"
           }
 
 
@@ -4947,7 +5076,7 @@ jobs:
       # VALIDACAO FINAL
       # =========================================================
 
-      - name: Validar V15.25 Logo Control
+      - name: Validar V15.26 Narrative Coherence
         shell: bash
 
         run: |
@@ -4994,7 +5123,7 @@ jobs:
 
 
           echo "========================================"
-          echo "V15.25 LOGO CONTROL VALIDADO"
+          echo "V15.26 NARRATIVE COHERENCE VALIDADO"
           echo "Tempo: ${{ inputs.tempo }}"
           echo "Logo: ${{ inputs.logo_posicao }}"
           echo "Original: $DURATION s"
@@ -5070,6 +5199,7 @@ jobs:
           path: |
             output/stage06_ai/director_plan.json
             output/stage06_ai/director_raw.txt
+            output/stage06_ai/narrator_raw.txt
             output/stage06_ai/provider.txt
 
           retention-days: 7
@@ -5093,7 +5223,7 @@ jobs:
           if-no-files-found: warn
 
 
-      - name: Disponibilizar Final V15.25
+      - name: Disponibilizar Final V15.26
         uses: actions/upload-artifact@v4
 
         with:
@@ -5101,7 +5231,6 @@ jobs:
 
           path: |
             output/stage07/ai_visual_master.mp4
-            output/stage07/ai_visual_master_fallback.mp4
             output/stage08/narration.txt
             output/stage08/tts_engine.txt
             output/stage08/narration_raw.mp3
