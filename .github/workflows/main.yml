@@ -4023,7 +4023,8 @@ jobs:
 
           sudo apt-get install -y espeak-ng
 
-          python3 -m pip install edge-tts gTTS
+          python3 -m pip install --retries 5 --timeout 60 "aiohttp==3.13.4"
+          python3 -m pip install --retries 5 --timeout 60 "edge-tts==7.2.8" "gTTS==2.5.4"
 
 
       - name: Stage 08 - Montar Texto Continuo
