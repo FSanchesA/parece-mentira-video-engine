@@ -1,4 +1,4 @@
-name: Parece Mentira - Video Engine V15.34 Gemini Resiliente
+name: Parece Mentira - Video Engine V15.35 Gemini Resiliente Total
  
 run-name: ${{ inputs.app_job_tag != '' && format('APP {0}', inputs.app_job_tag) || 'Execucao manual' }}
  
@@ -2790,13 +2790,92 @@ jobs:
                       )
                   )
  
-              narration_response = client.models.generate_content(
-                  model=selected_model,
-                  contents=narrator_contents,
-                  config=types.GenerateContentConfig(
-                      response_mime_type="application/json",
-                      temperature=0.25
+              # V15.35: a narracao usa a mesma estrategia resiliente do Director.
+              # Comeca pelo modelo que respondeu na montagem visual e, em caso
+              # de 503/429/timeout, percorre todos os fallbacks antes de falhar.
+              narration_response = None
+              narration_model = None
+              narration_last_error = None
+ 
+              narration_models = [selected_model] + [
+                  model_name
+                  for model_name in models_to_try
+                  if model_name != selected_model
+              ]
+ 
+              for model_name in narration_models:
+ 
+                  for attempt in range(1, 5):
+ 
+                      try:
+ 
+                          print(
+                              f"Narrador tentando {model_name} "
+                              f"(tentativa {attempt}/4)..."
+                          )
+ 
+                          narration_response = client.models.generate_content(
+                              model=model_name,
+                              contents=narrator_contents,
+                              config=types.GenerateContentConfig(
+                                  response_mime_type="application/json",
+                                  temperature=0.25
+                              )
+                          )
+ 
+                          if (
+                              narration_response
+                              and
+                              (narration_response.text or "").strip()
+                          ):
+                              narration_model = model_name
+                              break
+ 
+                      except Exception as exc:
+ 
+                          narration_last_error = exc
+                          msg = str(exc)
+                          msg_lower = msg.lower()
+ 
+                          retryable = (
+                              "503" in msg
+                              or "UNAVAILABLE" in msg
+                              or "429" in msg
+                              or "RESOURCE_EXHAUSTED" in msg
+                              or "high demand" in msg_lower
+                              or "server disconnected" in msg_lower
+                              or "remoteprotocolerror" in msg_lower
+                              or "connection reset" in msg_lower
+                              or "connection aborted" in msg_lower
+                              or "connection error" in msg_lower
+                              or "read timeout" in msg_lower
+                              or "write timeout" in msg_lower
+                              or "connect timeout" in msg_lower
+                              or "timed out" in msg_lower
+                              or "temporarily unavailable" in msg_lower
+                          )
+ 
+                          print(
+                              f"Falha no narrador em {model_name}: {exc}"
+                          )
+ 
+                          if not retryable:
+                              raise
+ 
+                          if attempt < 4:
+                              time.sleep(10 * attempt)
+ 
+                  if narration_model:
+                      break
+ 
+              if narration_response is None or narration_model is None:
+                  raise RuntimeError(
+                      "Nenhum modelo Gemini respondeu na narracao. "
+                      f"Ultimo erro: {narration_last_error}"
                   )
+ 
+              print(
+                  f"Narracao Gemini concluida com {narration_model}."
               )
  
               narration_raw = (
@@ -5113,7 +5192,7 @@ jobs:
       # VALIDACAO FINAL
       # =========================================================
  
-      - name: Validar V15.34 Gemini Resiliente
+      - name: Validar V15.35 Gemini Resiliente Total
         shell: bash
  
         run: |
@@ -5160,7 +5239,7 @@ jobs:
  
  
           echo "========================================"
-          echo "V15.34 GEMINI RESILIENTE VALIDADO"
+          echo "V15.35 GEMINI RESILIENTE TOTAL VALIDADO"
           echo "Tempo: ${{ inputs.tempo }}"
           echo "Logo: ${{ inputs.logo_posicao }}"
           echo "Original: $DURATION s"
@@ -5260,7 +5339,7 @@ jobs:
           if-no-files-found: warn
  
  
-      - name: Disponibilizar Final V15.34
+      - name: Disponibilizar Final V15.35
         uses: actions/upload-artifact@v4
  
         with:
