@@ -1,4 +1,4 @@
-name: Parece Mentira - Video Engine V15.35 Gemini Resiliente Total
+name: Parece Mentira - Video Engine V15.36 Long Scene Editorial
  
 run-name: ${{ inputs.app_job_tag != '' && format('APP {0}', inputs.app_job_tag) || 'Execucao manual' }}
  
@@ -573,6 +573,59 @@ jobs:
           mv \
             output/scene_report_unique.txt \
             output/scene_report.txt
+
+          # V15.36 - LONG SCENE EDITORIAL
+          # Mantem todos os cortes reais detectados e subdivide somente
+          # intervalos longos (>10s) em blocos editoriais de ate ~7s.
+          # Isso da ao Director opcoes temporais sem alterar o video-fonte.
+          python3 - <<'PY'
+          from pathlib import Path
+          import math
+
+          path = Path("output/scene_report.txt")
+          points = []
+
+          for raw in path.read_text(encoding="utf-8").splitlines():
+              raw = raw.strip()
+              if not raw:
+                  continue
+              try:
+                  points.append(float(raw))
+              except ValueError:
+                  pass
+
+          points = sorted(set(points))
+
+          if len(points) >= 2:
+              dense = [points[0]]
+
+              for start, end in zip(points, points[1:]):
+                  gap = end - start
+
+                  if gap > 10.0:
+                      parts = max(2, math.ceil(gap / 7.0))
+                      step = gap / parts
+
+                      for idx in range(1, parts):
+                          dense.append(start + step * idx)
+
+                  dense.append(end)
+
+              cleaned = []
+              for value in dense:
+                  if not cleaned or abs(value - cleaned[-1]) > 0.001:
+                      cleaned.append(value)
+
+              path.write_text(
+                  "\n".join(f"{value:.6f}" for value in cleaned) + "\n",
+                  encoding="utf-8"
+              )
+
+              print(
+                  f"V15.36 Long Scene Editorial: "
+                  f"{len(points)-1} cenas-base -> {len(cleaned)-1} blocos editoriais"
+              )
+          PY
  
           cat output/scene_report.txt
  
@@ -1602,25 +1655,61 @@ jobs:
  
  
           else:
- 
-              target_min = 0.0
- 
-              target_max = total_duration
- 
-              narration_target = max(
-                  total_duration - 2.0,
-                  8.0
-              )
- 
- 
-              tempo_instruction = """
-              MODO DE DURACAO: AUTO.
- 
-              Use liberdade editorial normal.
- 
-              O video pode terminar antes da duracao original
-              se isso melhorar o ritmo.
-              """
+
+              if total_duration >= 40.0:
+
+                  target_min = min(
+                      30.0,
+                      total_duration
+                  )
+
+                  target_max = min(
+                      45.0,
+                      total_duration
+                  )
+
+                  narration_target = max(
+                      target_max - 2.0,
+                      8.0
+                  )
+
+                  tempo_instruction = f"""
+                  MODO DE DURACAO: AUTO - FONTE LONGA.
+
+                  O video-fonte tem {total_duration:.2f}s.
+
+                  Quando houver conteudo visual aproveitavel, construa uma historia
+                  final entre aproximadamente {target_min:.2f}s e {target_max:.2f}s.
+
+                  Esta faixa e um ALVO EDITORIAL FORTE: nao resuma uma fonte longa
+                  para 10-15 segundos apenas porque existem poucos cortes de camera.
+
+                  Use os blocos temporais disponiveis para criar progressao narrativa.
+                  Corte somente trechos fracos, redundantes ou sem funcao narrativa.
+
+                  Nao alongue artificialmente se o material realmente nao sustentar
+                  a faixa-alvo. Coerencia continua acima de duracao.
+                  """
+
+              else:
+
+                  target_min = 0.0
+
+                  target_max = total_duration
+
+                  narration_target = max(
+                      total_duration - 2.0,
+                      8.0
+                  )
+
+                  tempo_instruction = """
+                  MODO DE DURACAO: AUTO.
+
+                  Use liberdade editorial normal.
+
+                  O video pode terminar antes da duracao original
+                  se isso melhorar o ritmo.
+                  """
  
  
           target_words = max(
@@ -1740,6 +1829,11 @@ jobs:
               {total_duration*0.90:.2f}
               a
               {total_duration:.2f}s.
+
+          20A. No modo AUTO com fonte de 40 segundos ou mais, nao confunda
+               poucos cortes de camera com pouco conteudo. Use os blocos temporais
+               fornecidos para construir uma progressao completa e respeite a faixa
+               editorial indicada em REGRA DE TEMPO sempre que o material sustentar.
  
           21. A HISTORIA PRINCIPAL deve permanecer em ordem cronologica da fonte.
               Pode remover cenas dispensaveis, repetitivas ou fracas para melhorar ritmo,
@@ -2790,7 +2884,7 @@ jobs:
                       )
                   )
  
-              # V15.35: a narracao usa a mesma estrategia resiliente do Director.
+              # V15.36: mantem a estrategia resiliente do Director e Narrator.
               # Comeca pelo modelo que respondeu na montagem visual e, em caso
               # de 503/429/timeout, percorre todos os fallbacks antes de falhar.
               narration_response = None
@@ -5192,7 +5286,7 @@ jobs:
       # VALIDACAO FINAL
       # =========================================================
  
-      - name: Validar V15.35 Gemini Resiliente Total
+      - name: Validar V15.36 Long Scene Editorial
         shell: bash
  
         run: |
@@ -5239,7 +5333,7 @@ jobs:
  
  
           echo "========================================"
-          echo "V15.35 GEMINI RESILIENTE TOTAL VALIDADO"
+          echo "V15.36 LONG SCENE EDITORIAL VALIDADO"
           echo "Tempo: ${{ inputs.tempo }}"
           echo "Logo: ${{ inputs.logo_posicao }}"
           echo "Original: $DURATION s"
@@ -5339,7 +5433,7 @@ jobs:
           if-no-files-found: warn
  
  
-      - name: Disponibilizar Final V15.35
+      - name: Disponibilizar Final V15.36
         uses: actions/upload-artifact@v4
  
         with:
