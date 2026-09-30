@@ -1,4 +1,4 @@
-name: Parece Mentira - Video Engine V15.36 Long Scene Editorial
+name: Parece Mentira - Video Engine V15.37 Long Scene Editorial
  
 run-name: ${{ inputs.app_job_tag != '' && format('APP {0}', inputs.app_job_tag) || 'Execucao manual' }}
  
@@ -574,7 +574,7 @@ jobs:
             output/scene_report_unique.txt \
             output/scene_report.txt
 
-          # V15.36 - LONG SCENE EDITORIAL
+          # V15.37 - LONG SCENE EDITORIAL
           # Mantem todos os cortes reais detectados e subdivide somente
           # intervalos longos (>10s) em blocos editoriais de ate ~7s.
           # Isso da ao Director opcoes temporais sem alterar o video-fonte.
@@ -622,7 +622,7 @@ jobs:
               )
 
               print(
-                  f"V15.36 Long Scene Editorial: "
+                  f"V15.37 Long Scene Editorial: "
                   f"{len(points)-1} cenas-base -> {len(cleaned)-1} blocos editoriais"
               )
           PY
@@ -769,7 +769,7 @@ jobs:
           set -e
  
           python3 -m pip install --upgrade pip
-          python3 -m pip install faster-whisper pillow
+          python3 -m pip install "faster-whisper==1.2.1" "av==18.0.0" pillow
  
  
       - name: Stage 05 - Detectar Audio
@@ -2884,7 +2884,7 @@ jobs:
                       )
                   )
  
-              # V15.36: mantem a estrategia resiliente do Director e Narrator.
+              # V15.37: mantem a estrategia resiliente do Director e Narrator.
               # Comeca pelo modelo que respondeu na montagem visual e, em caso
               # de 503/429/timeout, percorre todos os fallbacks antes de falhar.
               narration_response = None
@@ -5286,7 +5286,7 @@ jobs:
       # VALIDACAO FINAL
       # =========================================================
  
-      - name: Validar V15.36 Long Scene Editorial
+      - name: Validar V15.37 Long Scene Editorial
         shell: bash
  
         run: |
@@ -5333,7 +5333,7 @@ jobs:
  
  
           echo "========================================"
-          echo "V15.36 LONG SCENE EDITORIAL VALIDADO"
+          echo "V15.37 LONG SCENE EDITORIAL VALIDADO"
           echo "Tempo: ${{ inputs.tempo }}"
           echo "Logo: ${{ inputs.logo_posicao }}"
           echo "Original: $DURATION s"
@@ -5433,7 +5433,7 @@ jobs:
           if-no-files-found: warn
  
  
-      - name: Disponibilizar Final V15.36
+      - name: Disponibilizar Final V15.37
         uses: actions/upload-artifact@v4
  
         with:
