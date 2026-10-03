@@ -1,4 +1,4 @@
-name: Parece Mentira - Video Engine V15.37 Long Scene Editorial
+name: Parece Mentira - Video Engine V15.38 Long Scene Editorial
  
 run-name: ${{ inputs.app_job_tag != '' && format('APP {0}', inputs.app_job_tag) || 'Execucao manual' }}
  
@@ -574,7 +574,7 @@ jobs:
             output/scene_report_unique.txt \
             output/scene_report.txt
 
-          # V15.37 - LONG SCENE EDITORIAL
+          # V15.38 - LONG SCENE EDITORIAL
           # Mantem todos os cortes reais detectados e subdivide somente
           # intervalos longos (>10s) em blocos editoriais de ate ~7s.
           # Isso da ao Director opcoes temporais sem alterar o video-fonte.
@@ -622,7 +622,7 @@ jobs:
               )
 
               print(
-                  f"V15.37 Long Scene Editorial: "
+                  f"V15.38 Long Scene Editorial: "
                   f"{len(points)-1} cenas-base -> {len(cleaned)-1} blocos editoriais"
               )
           PY
@@ -2777,7 +2777,7 @@ jobs:
           # SEGUNDA PASSAGEM - NARRADOR SOBRE A TIMELINE FINAL
           # =====================================================
  
-          if user_mode == "SEM_NARRACAO":
+          if user_mode in ("SEM_NARRACAO", "ORIGINAL"):
  
               for item in timeline:
                   item["narration"] = ""
@@ -2884,7 +2884,7 @@ jobs:
                       )
                   )
  
-              # V15.37: mantem a estrategia resiliente do Director e Narrator.
+              # V15.38: mantem a estrategia resiliente do Director e Narrator.
               # Comeca pelo modelo que respondeu na montagem visual e, em caso
               # de 503/429/timeout, percorre todos os fallbacks antes de falhar.
               narration_response = None
@@ -4296,11 +4296,124 @@ jobs:
           PY
  
  
+      - name: Stage 08 - Reconstruir Audio Original
+        if: ${{ inputs.modo == 'ORIGINAL' }}
+        shell: bash
+
+        run: |
+          set -e
+
+          mkdir -p output/stage08/original_segments
+          rm -f output/stage08/original_segments/* output/stage08/original_concat.txt
+
+          AUDIO_COUNT=$(ffprobe \
+            -v error \
+            -select_streams a \
+            -show_entries stream=index \
+            -of csv=p=0 \
+            output/clean_master.mp4 \
+            | wc -l)
+
+          if [ "$AUDIO_COUNT" -lt 1 ]; then
+            echo "ERRO: modo ORIGINAL selecionado, mas o video-fonte nao possui audio."
+            exit 1
+          fi
+
+          python3 - <<'PYCODE'
+          import csv
+          import json
+          import subprocess
+          from pathlib import Path
+
+          plan = json.loads(Path("output/stage06_ai/director_plan.json").read_text(encoding="utf-8"))
+
+          by_scene = {}
+          with open("output/edit_plan.csv", newline="", encoding="utf-8") as f:
+              for row in csv.DictReader(f):
+                  scene = int(row["scene"])
+                  by_scene[scene] = {
+                      "start": float(row["start"]),
+                      "duration": float(row["duration"]),
+                  }
+
+          concat_lines = []
+
+          for idx, item in enumerate(plan.get("timeline", []), start=1):
+              kind = item.get("kind")
+              target = float(item.get("duration", 0))
+              if target <= 0.01:
+                  continue
+
+              out = Path("output/stage08/original_segments") / f"{idx:03d}.m4a"
+
+              if kind == "increment":
+                  cmd = [
+                      "ffmpeg", "-y", "-f", "lavfi",
+                      "-i", "anullsrc=r=48000:cl=stereo",
+                      "-t", f"{target:.3f}",
+                      "-c:a", "aac", "-b:a", "160k", str(out),
+                  ]
+              else:
+                  scene = int(item["scene"])
+                  source = by_scene[scene]
+                  src_duration = float(source["duration"])
+                  start = float(source["start"])
+
+                  if target <= src_duration:
+                      input_duration = target
+                      actual_target = target
+                      audio_filter = "aresample=48000"
+                  else:
+                      factor = min(target / src_duration, 1.10)
+                      input_duration = src_duration
+                      actual_target = src_duration * factor
+                      audio_filter = f"atempo={1.0/factor:.6f},aresample=48000"
+
+                  cmd = [
+                      "ffmpeg", "-y",
+                      "-ss", f"{start:.6f}",
+                      "-i", "output/clean_master.mp4",
+                      "-t", f"{input_duration:.6f}",
+                      "-vn", "-af", audio_filter,
+                      "-c:a", "aac", "-b:a", "160k", str(out),
+                  ]
+
+              subprocess.run(cmd, check=True)
+              concat_lines.append(f"file '{out.resolve()}'")
+
+          if not concat_lines:
+              raise RuntimeError("Timeline sem segmentos para reconstruir o audio original.")
+
+          Path("output/stage08/original_concat.txt").write_text(
+              "\n".join(concat_lines) + "\n", encoding="utf-8"
+          )
+          PYCODE
+
+          ffmpeg -y \
+            -f concat \
+            -safe 0 \
+            -i output/stage08/original_concat.txt \
+            -c:a aac \
+            -b:a 160k \
+            output/stage08/original_audio_master.m4a
+
+          test -s output/stage08/original_audio_master.m4a
+          echo "ORIGINAL" > output/stage08/tts_engine.txt
+
+
       - name: Stage 08 - Gerar Voz Continua
         shell: bash
  
+        env:
+          USER_MODE: ${{ inputs.modo }}
+
         run: |
           set -e
+ 
+          if [ "$USER_MODE" = "ORIGINAL" ]; then
+            test -s output/stage08/original_audio_master.m4a
+            exit 0
+          fi
  
           TEXT=$(cat output/stage08/narration.txt)
  
@@ -4411,9 +4524,34 @@ jobs:
  
         env:
           USER_TEMPO: ${{ inputs.tempo }}
+          USER_MODE: ${{ inputs.modo }}
  
         run: |
           set -e
+ 
+ 
+          if [ "$USER_MODE" = "ORIGINAL" ]; then
+ 
+            VIDEO_DURATION=$(ffprobe \
+              -v error \
+              -show_entries format=duration \
+              -of default=noprint_wrappers=1:nokey=1 \
+              output/stage07/ai_visual_master.mp4)
+ 
+            ffmpeg -y \
+              -i output/stage07/ai_visual_master.mp4 \
+              -i output/stage08/original_audio_master.m4a \
+              -map 0:v:0 \
+              -map 1:a:0 \
+              -c:v copy \
+              -c:a copy \
+              -t "$VIDEO_DURATION" \
+              -movflags +faststart \
+              output/stage08/final_ai_director.mp4
+ 
+            test -s output/stage08/final_ai_director.mp4
+            exit 0
+          fi
  
  
           if [ -f output/stage08/no_narration.flag ]; then
@@ -5286,7 +5424,7 @@ jobs:
       # VALIDACAO FINAL
       # =========================================================
  
-      - name: Validar V15.37 Long Scene Editorial
+      - name: Validar V15.38 Long Scene Editorial
         shell: bash
  
         run: |
@@ -5333,7 +5471,7 @@ jobs:
  
  
           echo "========================================"
-          echo "V15.37 LONG SCENE EDITORIAL VALIDADO"
+          echo "V15.38 LONG SCENE EDITORIAL VALIDADO"
           echo "Tempo: ${{ inputs.tempo }}"
           echo "Logo: ${{ inputs.logo_posicao }}"
           echo "Original: $DURATION s"
@@ -5433,7 +5571,7 @@ jobs:
           if-no-files-found: warn
  
  
-      - name: Disponibilizar Final V15.37
+      - name: Disponibilizar Final V15.38
         uses: actions/upload-artifact@v4
  
         with:
