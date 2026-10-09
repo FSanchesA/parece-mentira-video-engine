@@ -1,4 +1,4 @@
-name: Parece Mentira - Video Engine V15.38 Long Scene Editorial
+name: Parece Mentira - Video Engine V15.39 FFprobe Duration Fallback
  
 run-name: ${{ inputs.app_job_tag != '' && format('APP {0}', inputs.app_job_tag) || 'Execucao manual' }}
  
@@ -1190,9 +1190,9 @@ jobs:
           font = get_font(28)
  
  
-          def probe_duration(path):
+          def probe_duration(path, fallback_duration=None):
  
-              result = subprocess.run(
+              probes = [
                   [
                       "ffprobe",
                       "-v",
@@ -1203,16 +1203,60 @@ jobs:
                       "default=noprint_wrappers=1:nokey=1",
                       str(path)
                   ],
-                  check=True,
-                  capture_output=True,
-                  text=True
-              )
+                  [
+                      "ffprobe",
+                      "-v",
+                      "error",
+                      "-select_streams",
+                      "v:0",
+                      "-show_entries",
+                      "stream=duration",
+                      "-of",
+                      "default=noprint_wrappers=1:nokey=1",
+                      str(path)
+                  ]
+              ]
  
-              return max(
-                  float(
-                      result.stdout.strip() or 0
-                  ),
-                  0.001
+              for command in probes:
+ 
+                  result = subprocess.run(
+                      command,
+                      check=False,
+                      capture_output=True,
+                      text=True
+                  )
+ 
+                  value = result.stdout.strip()
+ 
+                  try:
+                      duration = float(value)
+                  except (TypeError, ValueError):
+                      continue
+ 
+                  if duration > 0:
+                      return max(
+                          duration,
+                          0.001
+                      )
+ 
+              try:
+                  duration = float(fallback_duration)
+              except (TypeError, ValueError):
+                  duration = 0.0
+ 
+              if duration > 0:
+                  print(
+                      f"Aviso: ffprobe sem duracao valida para {path}; "
+                      f"usando duracao do manifest: {duration:.6f}s"
+                  )
+ 
+                  return max(
+                      duration,
+                      0.001
+                  )
+ 
+              raise RuntimeError(
+                  f"Nao foi possivel determinar a duracao de {path}"
               )
  
  
@@ -1307,7 +1351,8 @@ jobs:
  
  
               duration = probe_duration(
-                  clip
+                  clip,
+                  scene.get("duration")
               )
  
               frame_paths = []
@@ -5424,7 +5469,7 @@ jobs:
       # VALIDACAO FINAL
       # =========================================================
  
-      - name: Validar V15.38 Long Scene Editorial
+      - name: Validar V15.39 FFprobe Duration Fallback
         shell: bash
  
         run: |
@@ -5471,7 +5516,7 @@ jobs:
  
  
           echo "========================================"
-          echo "V15.38 LONG SCENE EDITORIAL VALIDADO"
+          echo "V15.39 FFPROBE DURATION FALLBACK VALIDADO"
           echo "Tempo: ${{ inputs.tempo }}"
           echo "Logo: ${{ inputs.logo_posicao }}"
           echo "Original: $DURATION s"
@@ -5571,7 +5616,7 @@ jobs:
           if-no-files-found: warn
  
  
-      - name: Disponibilizar Final V15.38
+      - name: Disponibilizar Final V15.39
         uses: actions/upload-artifact@v4
  
         with:
